@@ -1,5 +1,7 @@
 """Tests for the Goal domain model."""
 
+from datetime import datetime
+
 import pytest
 from pydantic import ValidationError
 
@@ -52,3 +54,14 @@ def test_failed_model_rule_on_assignment_keeps_old_value():
     with pytest.raises(ValidationError):
         goal.status = "achieved"
     assert goal.status == GoalStatus.NOT_STARTED
+
+
+def test_created_at_is_timezone_aware_utc():
+    goal = make_goal()
+    assert goal.created_at.utcoffset() is not None
+    assert goal.created_at.utcoffset().total_seconds() == 0
+
+
+def test_naive_created_at_is_rejected():
+    with pytest.raises(ValidationError):
+        make_goal(created_at=datetime(2026, 10, 6, 12, 0))
