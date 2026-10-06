@@ -3,10 +3,12 @@
 from datetime import date
 from typing import Self
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Cohort(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
+
     id: int | None = None
     name: str = Field(min_length=1, max_length=50)
     start_date: date
@@ -20,6 +22,8 @@ class Cohort(BaseModel):
 
 
 class Group(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
+
     id: int | None = None
     name: str = Field(min_length=1, max_length=50)
     cohort_id: int

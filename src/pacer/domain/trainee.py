@@ -1,11 +1,13 @@
 """Trainees and their sensitive personal files."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .enums import TraineeStatus
 
 
 class Trainee(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
+
     id: int | None = None
     first_name: str = Field(min_length=1, max_length=50)
     last_name: str = Field(min_length=1, max_length=50)
@@ -25,6 +27,8 @@ class Trainee(BaseModel):
 
 class PersonalFile(BaseModel):
     """Sensitive data. Visible to managers, or to counselors with approval."""
+
+    model_config = ConfigDict(validate_assignment=True)
 
     id: int | None = None
     trainee_id: int

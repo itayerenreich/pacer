@@ -3,12 +3,14 @@
 from datetime import date, datetime
 from typing import Self
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .enums import GoalCategory, GoalStatus
 
 
 class Goal(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
+
     id: int | None = None
     trainee_id: int
     title: str = Field(min_length=3, max_length=200)
@@ -27,6 +29,8 @@ class Goal(BaseModel):
 
 
 class GoalUpdate(BaseModel):
+    model_config = ConfigDict(validate_assignment=True)
+
     id: int | None = None
     goal_id: int
     author_id: int
