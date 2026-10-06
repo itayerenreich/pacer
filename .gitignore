@@ -9,4 +9,7 @@ wheels/
 # Virtual environments
 .venv
 # Test cache
-.pytest_cache/
+.pytest_cache
+# Secrets
+.env
+
