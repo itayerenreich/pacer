@@ -1,0 +1,33 @@
+# Runs the whole test suite on every pull request and on every push to main.
+# Integration tests start a throwaway PostgreSQL 17 container with testcontainers;
+# Docker is already installed on GitHub's ubuntu runners, and no .env is needed.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:  # a newer push to the same branch cancels the older, now-outdated run
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true  # reuse downloaded packages between runs
+
+      - name: Install dependencies exactly as locked
+        run: uv sync --locked  # fails if uv.lock does not match pyproject.toml
+
+      - name: Run all tests (fast + integration)
+        run: uv run pytest -v
