@@ -37,3 +37,18 @@ class LoggingSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     log_level: str = "INFO"  # LOG_LEVEL=DEBUG in .env shows everything
+
+
+class AISettings(BaseSettings):
+    """Model access. Separate from Settings: nothing here is required, so the fast tests and CI
+    run without any key. A missing key fails only when a real cloud call is attempted."""
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    anthropic_api_key: SecretStr | None = None  # ANTHROPIC_API_KEY in .env, never in Git
+    ollama_base_url: str = "http://localhost:11434"
+
+
+@lru_cache
+def get_ai_settings() -> AISettings:
+    return AISettings()

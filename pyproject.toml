@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.20.0",
     "fastapi>=0.143.1",
+    "litellm==1.104.2",
     "psycopg[binary]>=3.3.6",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
@@ -34,4 +35,9 @@ dev = [
 [tool.pytest.ini_options]
 markers = [
     "integration: needs Docker (runs against a real PostgreSQL container)",
+    "llm: calls a real language model; skipped unless run with --run-llm",
+]
+filterwarnings = [
+    # litellm's own type definitions trigger this pydantic notice; it is not about our code
+    "ignore:Item .* is using the `ReadOnly` qualifier:UserWarning",
 ]

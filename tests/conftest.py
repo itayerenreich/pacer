@@ -57,3 +57,21 @@ def engine(migrated_engine: Engine) -> Iterator[Engine]:
     table_names = ", ".join(table.name for table in Base.metadata.sorted_tables)
     with migrated_engine.begin() as connection:
         connection.execute(text(f"TRUNCATE {table_names} RESTART IDENTITY CASCADE"))
+
+
+# --- tests against real language models -------------------------------------------------
+# Marked @pytest.mark.llm. They cost money (cloud) or need Ollama running, so they are
+# skipped unless asked for explicitly:   uv run pytest --run-llm -m llm
+
+
+def pytest_addoption(parser):
+    parser.addoption("--run-llm", action="store_true", help="also run tests that call real language models")
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.getoption("--run-llm"):
+        return
+    skip = pytest.mark.skip(reason="calls a real model: run with --run-llm")
+    for item in items:
+        if "llm" in item.keywords:
+            item.add_marker(skip)
