@@ -86,6 +86,16 @@ class ProposedTaskRepository:
         row = self._session.get(ProposedTaskRow, proposal_id)
         return None if row is None else ProposedTask.model_validate(row, from_attributes=True)
 
+    def lock(self, proposal_id: int) -> ProposedTask | None:
+        """SELECT ... FOR UPDATE, re-read even if this session saw the row before."""
+        row = self._session.scalars(
+            select(ProposedTaskRow)
+            .where(ProposedTaskRow.id == proposal_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).first()
+        return None if row is None else ProposedTask.model_validate(row, from_attributes=True)
+
     def update(self, proposal: ProposedTask) -> ProposedTask:
         row = self._session.get(ProposedTaskRow, proposal.id)
         if row is None:

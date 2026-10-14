@@ -273,8 +273,15 @@ class MeetingPipeline:
         """Store the audio of a meeting that is waiting for it (created without a transcript).
         Returns its size in bytes. Refused up front when this server cannot transcribe."""
         self._require_local_transcriber()
+        recordings = self._require_recordings()
         _require_status(self._read(actor, meeting_id), M.UPLOADED)
-        return self._require_recordings().save(meeting_id, chunks, suffix).stat().st_size
+        size = recordings.save(meeting_id, chunks, suffix).stat().st_size
+        # The upload took time. If the meeting moved on meanwhile, nothing would ever transcribe
+        # or delete this file: remove it now rather than keep a recording no one will use.
+        if self._read(actor, meeting_id).status is not M.UPLOADED:
+            recordings.delete(meeting_id)
+            raise RuleViolationError(f"Meeting {meeting_id} was processed during the upload; the recording was deleted")
+        return size
 
     # --- stage 1: transcribe (local) ---------------------------------------------------------
 

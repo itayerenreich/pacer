@@ -425,3 +425,21 @@ def test_a_participant_who_never_spoke_can_be_named_by_token(uow, manager):
     assert result.meeting.summary == "רונית שמעוני ביקשה מנועה לוי לקבוע את שעות ההתנדבות."
     assert result.proposals[0].owner_id == 2
     assert result.issues == []  # her token was in the message, so it is not "invented"
+
+
+def test_a_recording_that_arrives_after_the_meeting_moved_on_is_deleted(uow, repos, manager, cloud, recordings, monkeypatch):
+    """The upload took a while; meanwhile someone gave the meeting a transcript some other way."""
+    pipeline = make_pipeline(uow, cloud, transcriber=FakeTranscriber(text=TRANSCRIBED), recordings=recordings)
+    meeting_id = record(uow, manager, with_transcript=False)
+    real_save = recordings.save
+
+    def save_while_meeting_moves_on(*args, **kwargs):
+        path = real_save(*args, **kwargs)
+        meeting = repos.meetings.get(meeting_id)
+        repos.meetings.update(meeting.advance(MeetingStatus.TRANSCRIBED, transcript=TRANSCRIBED))
+        return path
+
+    monkeypatch.setattr(recordings, "save", save_while_meeting_moves_on)
+    with pytest.raises(RuleViolationError, match="during the upload"):
+        upload(pipeline, manager, meeting_id)
+    assert recordings.find(meeting_id) is None

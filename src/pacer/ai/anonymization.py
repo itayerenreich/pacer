@@ -20,7 +20,10 @@ Hebrew makes this harder than it looks:
 * A first name alone may fit two people (two trainees named יעל). Full names are resolved to
   the right person; an ambiguous first name gets a neutral token ([NAME_1]) that points to no
   one, and the result reports it so a person can resolve it.
-* First name alone, last name alone, and full name all map to the same person's token.
+* First name alone, last name alone, and full name all map to the same person's token. Each word
+  of a two-word first or last name counts too ("שרה לאה": "שרה" alone is her).
+* Spelling variants of the same name match: apostrophe or geresh (ג'ני, ג׳ני, ג’ני), hyphen or
+  maqaf (בר-און, בר־און), and upper or lower case for names in Latin letters (Dana, dana, DANA).
 
 Known limit: names that are NOT in the roster (a parent, someone outside the academy) are not
 detected. The prompts tell the model to use roles, not names, and the plan tracks this risk.
@@ -42,6 +45,27 @@ PREFIX_LETTERS = "ובכלמשה"
 _NOT_WORD_BEFORE = r"(?<!\w)"  # \w includes Hebrew letters in Python 3 regexes
 _NOT_WORD_AFTER = r"(?!\w)"
 _TOKEN = re.compile(r"\[(?:TRAINEE|STAFF)_\d+\]|\[NAME_\d+\]")
+# Characters that are written in several ways, and the one form we compare by.
+_VARIANTS = {"'": "'׳’`´", '"': '"״“”', "-": "-־–"}
+_CANONICAL = {variant: canonical for canonical, variants in _VARIANTS.items() for variant in variants}
+
+
+def _normalize(form: str) -> str:
+    """One way to write a name: single spaces, canonical apostrophe/quote/hyphen, lower case."""
+    return "".join(_CANONICAL.get(ch, ch) for ch in " ".join(form.split())).lower()
+
+
+def _regex_for(form: str) -> str:
+    """A normalized form as a regex that also matches its other spellings."""
+    parts = []
+    for ch in form:
+        if ch == " ":
+            parts.append(r"\s+")
+        elif ch in _VARIANTS:
+            parts.append(f"[{re.escape(_VARIANTS[ch])}]")
+        else:
+            parts.append(re.escape(ch))
+    return "".join(parts)
 
 
 class PersonKind(StrEnum):
@@ -97,28 +121,32 @@ class AnonymizedText:
 
 
 class Roster:
-    """Every known person, and every way their name can appear: full, first only, last only."""
+    """Every known person, and every way their name can appear: full, first only, last only,
+    and each word of a name that has several."""
 
     def __init__(self, people: Iterable[Person]) -> None:
         self.people = tuple(people)
         forms: dict[str, set[Person]] = defaultdict(set)
         for person in self.people:
-            for form in (person.full_name, person.first_name, person.last_name):
-                form = " ".join(form.split())
-                if form:
-                    forms[form].add(person)
-        # A surface form fits one person, or several (ambiguous). Longest first, so a full name
-        # wins over the first name inside it.
+            for form in _forms_of(person):
+                forms[_normalize(form)].add(person)
+        forms.pop("", None)
+        # A form fits one person, or several (ambiguous). Longest first, so a full name wins over
+        # the first name inside it. Keys are normalized: look them up with _normalize(surface).
         self.forms: Mapping[str, frozenset[Person]] = MappingProxyType(
             {form: frozenset(people) for form, people in sorted(forms.items(), key=lambda kv: -len(kv[0]))}
         )
-        alternatives = "|".join(r"\s+".join(map(re.escape, form.split())) for form in self.forms)
+        alternatives = "|".join(_regex_for(form) for form in self.forms)
         self._by_key = {(person.kind, person.id): person for person in self.people}
         self.pattern = re.compile(
             rf"{_NOT_WORD_BEFORE}(?P<prefix>[{PREFIX_LETTERS}]{{0,3}}?)(?P<name>{alternatives}){_NOT_WORD_AFTER}"
             if alternatives
-            else r"(?!)"  # an empty roster matches nothing
+            else r"(?!)",  # an empty roster matches nothing
+            re.IGNORECASE,  # Latin letters: Dana, dana, DANA. Hebrew has no case
         )
+
+    def candidates(self, surface: str) -> frozenset[Person]:
+        return self.forms[_normalize(surface)]
 
 
     def find(self, kind: PersonKind, person_id: int) -> Person | None:
@@ -138,15 +166,16 @@ class Anonymizer:
 
         def replace(match: re.Match) -> str:
             surface = " ".join(match["name"].split())
-            candidates = self._roster.forms[surface]
+            candidates = self._roster.candidates(surface)
             if len(candidates) == 1:
                 (person,) = candidates
                 people[person.token] = person
                 return match["prefix"] + person.token
-            if surface not in ambiguous_tokens:
-                ambiguous_tokens[surface] = f"[NAME_{len(ambiguous_tokens) + 1}]"
-                unresolved[ambiguous_tokens[surface]] = surface
-            return match["prefix"] + ambiguous_tokens[surface]
+            key = _normalize(surface)  # "Dana" and "dana" are the same ambiguous name
+            if key not in ambiguous_tokens:
+                ambiguous_tokens[key] = f"[NAME_{len(ambiguous_tokens) + 1}]"
+                unresolved[ambiguous_tokens[key]] = surface  # restored as it was first written
+            return match["prefix"] + ambiguous_tokens[key]
 
         result = self._roster.pattern.sub(replace, text)
         if self._roster.pattern.search(result):  # defense in depth: should never happen
@@ -186,6 +215,16 @@ def load_roster(staff: StaffRepo, trainees: TraineeRepo) -> Roster:
     people = [Person(PersonKind.STAFF, s.id, *_split_name(s.full_name)) for s in staff.list_all()]
     people += [Person(PersonKind.TRAINEE, t.id, t.first_name, t.last_name) for t in trainees.list_all()]
     return Roster(people)
+
+
+def _forms_of(person: Person) -> list[str]:
+    """Full name, first name, last name, and each word of a first or last name with several."""
+    forms = [person.full_name, person.first_name, person.last_name]
+    for name in (person.first_name, person.last_name):
+        words = name.split()
+        if len(words) > 1:
+            forms += [word for word in words if len(word) > 1]
+    return forms
 
 
 def _split_name(full_name: str) -> tuple[str, str]:

@@ -181,3 +181,84 @@ def test_a_failed_write_leaves_no_summary_and_no_proposals(academy, monkeypatch)
         meeting = repos.meetings.get(meeting_id)
         assert meeting.status is MeetingStatus.ANONYMIZED and meeting.summary is None
         assert repos.proposals.list_by_meeting(meeting_id) == []
+
+
+# --- the manager's decisions, at the same moment ----------------------------------------------------
+
+
+def _pending_meeting(engine) -> list[int]:
+    """A meeting through the pipeline (fake model): 4 proposals waiting for the manager."""
+    meeting_id = record(engine)
+    cloud = FakeLLMClient(answers=[GOOD], runs_locally=False)
+    result = MeetingPipeline(uow_for(engine), fake_router(cloud)).process(manager(engine), meeting_id)
+    return [p.id for p in result.proposals]
+
+
+def _slow_first_task_add(monkeypatch, inside: threading.Event):
+    """The first request pauses right after creating its Task, inside its open transaction."""
+    from pacer.repositories import TaskRepository
+
+    real_add = TaskRepository.add
+    calls = []
+
+    def slow_add(self, task):
+        saved = real_add(self, task)
+        calls.append(1)
+        if len(calls) == 1:
+            inside.set()
+            threading.Event().wait(0.7)  # hold the transaction open while the second request starts
+        return saved
+
+    monkeypatch.setattr(TaskRepository, "add", slow_add)
+
+
+def _decide(engine, action: str, proposal_id: int):
+    with repositories(engine) as repos:
+        service = MeetingService(repos.meetings, repos.proposals, repos.tasks, repos.staff)
+        return getattr(service, f"{action}_proposal")(repos.staff.get(1), proposal_id)
+
+
+def test_approving_the_same_proposal_twice_at_once_creates_one_task(academy, monkeypatch):
+    proposal_id = _pending_meeting(academy)[0]
+    inside = threading.Event()
+    _slow_first_task_add(monkeypatch, inside)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(_decide, academy, "approve", proposal_id)
+        assert inside.wait(10)
+        second = pool.submit(_decide, academy, "approve", proposal_id)  # a double click
+    outcomes = [first.exception(), second.exception()]
+
+    assert outcomes[0] is None and outcomes[1] is not None  # the second waited, then saw "approved"
+    with repositories(academy) as repos:
+        assert len(repos.tasks.list_all()) == 1
+
+
+def test_deciding_the_last_two_proposals_at_once_still_closes_the_meeting(academy, monkeypatch):
+    """Both requests count the open proposals. If they could count at the same moment, each would
+    still see the other's proposal as open, and nobody would close the meeting. The barrier lets
+    them meet right before counting; with the meeting locked they never can, and it times out."""
+    from pacer.repositories import ProposedTaskRepository
+
+    first_id, second_id, third_id, fourth_id = _pending_meeting(academy)
+    for proposal_id in (first_id, second_id):
+        _decide(academy, "reject", proposal_id)
+    before_counting = threading.Barrier(2, timeout=1.5)
+    real_count = ProposedTaskRepository.count_open
+
+    def count_together(self, meeting_id):
+        try:
+            before_counting.wait()
+        except threading.BrokenBarrierError:
+            pass  # the other request is waiting for the lock: it cannot be here
+        return real_count(self, meeting_id)
+
+    monkeypatch.setattr(ProposedTaskRepository, "count_open", count_together)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        approve = pool.submit(_decide, academy, "approve", third_id)
+        reject = pool.submit(_decide, academy, "reject", fourth_id)
+    assert approve.exception() is None and reject.exception() is None
+
+    with repositories(academy) as repos:
+        meeting_id = repos.proposals.get(third_id).meeting_id
+        assert repos.meetings.get(meeting_id).status is MeetingStatus.APPROVED  # not stuck

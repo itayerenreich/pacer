@@ -130,6 +130,9 @@ class FakeMeetingRepo(_Store[StaffMeeting]):
 
 
 class FakeProposedTaskRepo(_Store[ProposedTask]):
+    def lock(self, proposal_id: int) -> ProposedTask | None:
+        return self.get(proposal_id)
+
     def list_by_meeting(self, meeting_id: int) -> list[ProposedTask]:
         return self.where(meeting_id=meeting_id)
 

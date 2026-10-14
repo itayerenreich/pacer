@@ -235,3 +235,43 @@ def test_the_roster_finds_a_person_by_kind_and_id():
     roster = Roster(PEOPLE)
     assert roster.find(S, 2).first_name == "נועה"
     assert roster.find(T, 2) is None  # id 2 is a staff member, not a trainee
+
+
+# --- spelling variants and names of several words (found in an independent review) --------------
+
+
+def test_each_word_of_a_two_word_first_name_is_her_too():
+    sara_lea = Person(T, 40, "שרה לאה", "פרידמן")
+    anonymizer = Anonymizer(Roster([sara_lea]))
+    assert anonymize_text(anonymizer, "שרה הגיעה, ולאה נשארה. שרה לאה פרידמן") == (
+        "[TRAINEE_40] הגיעה, ו[TRAINEE_40] נשארה. [TRAINEE_40]"
+    )
+
+
+def test_latin_names_match_in_any_case():
+    dana = Person(S, 41, "Dana", "Levi")
+    anonymizer = Anonymizer(Roster([dana]))
+    assert anonymize_text(anonymizer, "dana and DANA LEVI met Dana") == "[STAFF_41] and [STAFF_41] met [STAFF_41]"
+
+
+@pytest.mark.parametrize("written", ["ג'ני", "ג׳ני", "ג’ני", "ג`ני"])
+def test_apostrophe_and_geresh_are_the_same_name(written):
+    jenny = Person(T, 42, "ג׳ני", "אלמוג")  # the roster spells it with a geresh
+    assert anonymize_text(Anonymizer(Roster([jenny])), f"{written} הגיעה") == "[TRAINEE_42] הגיעה"
+
+
+def test_hyphen_and_maqaf_are_the_same_name():
+    person = Person(T, 43, "עדי", "בר-און")
+    anonymizer = Anonymizer(Roster([person]))
+    assert anonymize_text(anonymizer, "משפחת בר־און ועדי בר-און") == "משפחת [TRAINEE_43] ו[TRAINEE_43]"
+
+
+def test_an_ambiguous_name_in_two_cases_gets_one_token_and_comes_back_as_written():
+    roster = Roster([Person(S, 44, "Dana", "Levi"), Person(S, 45, "Dana", "Katz")])
+    safe = Anonymizer(roster).anonymize("Dana said dana")
+    assert safe.text == "[NAME_1] said [NAME_1]"
+    assert deanonymize("[NAME_1]", safe) == "Dana"
+
+
+def anonymize_text(anonymizer: Anonymizer, text: str) -> str:
+    return anonymizer.anonymize(text).text
