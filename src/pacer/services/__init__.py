@@ -1,4 +1,4 @@
-"""Business logic: goal progress, permissions, approvals.
+"""Business logic: goal progress, permissions, approvals, meetings and tasks.
 
 May import from: domain, repositories.
 
@@ -18,14 +18,19 @@ Usage (the API will do this per request):
 from .approvals import ApprovalService
 from .errors import NotFoundError, PermissionDeniedError, RuleViolationError, ServiceError
 from .goals import GoalService
+from .meetings import MeetingService, ProposalEdits, TaskDraft, TaskService
 from .trainees import TraineeService
 
 __all__ = [
     "ApprovalService",
     "GoalService",
+    "MeetingService",
     "NotFoundError",
     "PermissionDeniedError",
+    "ProposalEdits",
     "RuleViolationError",
     "ServiceError",
+    "TaskDraft",
+    "TaskService",
     "TraineeService",
 ]

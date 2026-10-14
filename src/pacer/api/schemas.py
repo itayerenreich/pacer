@@ -15,7 +15,15 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from pacer.domain import ApprovalKind, ApprovalRequest, Goal, GoalCategory, Trainee, TraineeStatus
+from pacer.domain import (
+    ApprovalKind,
+    ApprovalRequest,
+    Goal,
+    GoalCategory,
+    StaffMeeting,
+    Trainee,
+    TraineeStatus,
+)
 
 
 class _Body(BaseModel):
@@ -59,3 +67,14 @@ class ApprovalCreate(_Body):
 
 class Decision(_Body):
     note: str | None = ApprovalRequest.model_fields["decision_note"]
+
+
+class MeetingCreate(_Body):
+    title: str = StaffMeeting.model_fields["title"]
+    held_on: date
+    participant_ids: list[int] = Field(min_length=1, description="Staff members who took part")
+    transcript: str | None = Field(
+        default=None,
+        min_length=20,
+        description="The meeting as text. Leave empty when an audio file will be uploaded instead (task 6).",
+    )

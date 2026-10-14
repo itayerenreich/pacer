@@ -109,3 +109,55 @@ class ApprovalRequestRow(Base):
     decision_note: Mapped[str | None] = mapped_column(String(1000))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+# Many-to-many link: which staff members took part in which meeting (same pattern as group_counselors).
+meeting_participants = Table(
+    "meeting_participants",
+    Base.metadata,
+    Column("meeting_id", ForeignKey("staff_meetings.id", ondelete="CASCADE"), primary_key=True),
+    Column("staff_id", ForeignKey("staff_members.id", ondelete="CASCADE"), primary_key=True),
+)
+
+
+class StaffMeetingRow(Base):
+    __tablename__ = "staff_meetings"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(200))
+    held_on: Mapped[date]
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("staff_members.id"))
+    status: Mapped[str] = mapped_column(String(30), index=True)
+    transcript: Mapped[str | None] = mapped_column(Text)
+    anonymized_transcript: Mapped[str | None] = mapped_column(Text)
+    summary: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ProposedTaskRow(Base):
+    __tablename__ = "proposed_tasks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    meeting_id: Mapped[int] = mapped_column(ForeignKey("staff_meetings.id"), index=True)
+    description: Mapped[str] = mapped_column(String(300))
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("staff_members.id"))
+    due_date: Mapped[date | None]
+    status: Mapped[str] = mapped_column(String(20))
+    decided_by_id: Mapped[int | None] = mapped_column(ForeignKey("staff_members.id"))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class TaskRow(Base):
+    __tablename__ = "tasks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    description: Mapped[str] = mapped_column(String(300))
+    owner_id: Mapped[int] = mapped_column(ForeignKey("staff_members.id"), index=True)
+    due_date: Mapped[date | None]
+    status: Mapped[str] = mapped_column(String(20))
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("staff_members.id"))
+    source_meeting_id: Mapped[int | None] = mapped_column(ForeignKey("staff_meetings.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
