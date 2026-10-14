@@ -275,3 +275,16 @@ def test_an_ambiguous_name_in_two_cases_gets_one_token_and_comes_back_as_written
 
 def anonymize_text(anonymizer: Anonymizer, text: str) -> str:
     return anonymizer.anonymize(text).text
+
+def test_who_the_text_is_about_resolves_an_ambiguous_first_name(anonymizer):
+    yael_mizrahi = Person(T, 7, "יעל", "מזרחי")
+    about_her = anonymizer.anonymize("יעל סיפרה שהיא רצה", prefer=[yael_mizrahi])
+    no_context = anonymizer.anonymize("יעל סיפרה שהיא רצה")
+    assert about_her.text == "[TRAINEE_7] סיפרה שהיא רצה" and about_her.unresolved == {}
+    assert no_context.text == "[NAME_1] סיפרה שהיא רצה"
+
+
+def test_preferring_someone_does_not_affect_names_that_are_not_theirs(anonymizer):
+    shahar = Person(T, 3, "שחר", "ששון")
+    safe = anonymizer.anonymize("כהן ושחר", prefer=[shahar])
+    assert safe.text == "[NAME_1] ו[TRAINEE_3]"  # כהן fits two others: still ambiguous

@@ -9,10 +9,10 @@ from datetime import date
 import pytest
 
 from pacer.ai.anonymization import Anonymizer, Person, PersonKind, Roster
+from pacer.ai.issues import IssueCode
 from pacer.ai.meeting_pipeline import (
     DUE_DATE_HORIZON,
     ExtractedTask,
-    IssueCode,
     MeetingExtraction,
     validate_extraction,
 )
@@ -46,7 +46,7 @@ def validate(*tasks: ExtractedTask, summary: str = "[STAFF_1] פתחה את הי
 
 
 def codes(result) -> list[tuple[IssueCode, int | None]]:
-    return [(issue.code, issue.task) for issue in result.issues]
+    return [(issue.code, issue.item) for issue in result.issues]
 
 
 def test_a_clean_answer_passes_unchanged_with_names_restored():

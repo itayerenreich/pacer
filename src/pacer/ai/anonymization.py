@@ -157,16 +157,24 @@ class Anonymizer:
     def __init__(self, roster: Roster) -> None:
         self._roster = roster
 
-    def anonymize(self, text: str, *, known: Iterable[Person] = ()) -> AnonymizedText:
-        """known: people the model is told about by token even if the text never names them
-        (e.g. the participants of a meeting), so their tokens in the answer can be mapped back."""
+    def anonymize(
+        self, text: str, *, known: Iterable[Person] = (), prefer: Iterable[Person] = ()
+    ) -> AnonymizedText:
+        """known:  people the model is told about by token even if the text never names them
+                   (e.g. the participants of a meeting), so their tokens in the answer map back.
+        prefer: who the text is about. When a name fits several people and exactly one of them
+                is preferred, it is that one (in a talk with Yael Mizrahi, "יעל" is her, not the
+                other Yael). Otherwise an ambiguous name still gets a neutral [NAME_n] token."""
         people: dict[str, Person] = {person.token: person for person in known}
+        preferred = frozenset(prefer)
         unresolved: dict[str, str] = {}
         ambiguous_tokens: dict[str, str] = {}  # the same ambiguous word gets the same token
 
         def replace(match: re.Match) -> str:
             surface = " ".join(match["name"].split())
             candidates = self._roster.candidates(surface)
+            if len(candidates) > 1 and len(candidates & preferred) == 1:
+                candidates = candidates & preferred
             if len(candidates) == 1:
                 (person,) = candidates
                 people[person.token] = person

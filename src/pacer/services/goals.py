@@ -41,13 +41,23 @@ class GoalService:
         there. Both are written in the caller's unit of work, so either both are
         saved or neither is.
         """
+        goal, _ = self._record(actor, goal_id, progress, note)
+        return goal
+
+    def record_progress(self, actor: StaffMember, goal_id: int, progress: int, note: str) -> GoalUpdate:
+        """The same as update_progress, for callers that need the history entry it created
+        (an approved talk proposal points to its GoalUpdate)."""
+        _, update = self._record(actor, goal_id, progress, note)
+        return update
+
+    def _record(self, actor: StaffMember, goal_id: int, progress: int, note: str) -> tuple[Goal, GoalUpdate]:
         goal = found(self._goals.get(goal_id), "Goal", goal_id)
         trainee = self._open_trainee(goal.trainee_id)
         require(can_edit_goals(actor, trainee), "update this goal")
 
         updated = goal.with_progress(progress)  # a new object; raises if the goal was dropped
         self._goals.update(updated)
-        self._updates.add(GoalUpdate(goal_id=goal_id, author_id=actor.id, progress=progress, note=note))
+        update = self._updates.add(GoalUpdate(goal_id=goal_id, author_id=actor.id, progress=progress, note=note))
         log.info(
             "Goal %s: progress %s -> %s (%s) by staff %s",
             goal_id,
@@ -56,7 +66,7 @@ class GoalService:
             updated.status,
             actor.id,
         )
-        return updated
+        return updated, update
 
     def list_goals(self, actor: StaffMember, trainee_id: int) -> list[Goal]:
         self._require_can_view(actor, trainee_id)

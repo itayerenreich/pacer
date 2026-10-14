@@ -1,4 +1,4 @@
-"""Business logic: goal progress, permissions, approvals, meetings and tasks.
+"""Business logic: goal progress, permissions, approvals, meetings and tasks, talks and notes.
 
 May import from: domain, repositories.
 
@@ -19,6 +19,7 @@ from .approvals import ApprovalService
 from .errors import NotFoundError, PermissionDeniedError, RuleViolationError, ServiceError
 from .goals import GoalService
 from .meetings import MeetingService, ProposalEdits, TaskDraft, TaskService
+from .talks import TalkDraft, TalkProposalEdits, TalkService
 from .trainees import TraineeService
 
 __all__ = [
@@ -30,6 +31,9 @@ __all__ = [
     "ProposalEdits",
     "RuleViolationError",
     "ServiceError",
+    "TalkDraft",
+    "TalkProposalEdits",
+    "TalkService",
     "TaskDraft",
     "TaskService",
     "TraineeService",

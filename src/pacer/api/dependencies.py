@@ -29,6 +29,7 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
 from pacer.ai.meeting_pipeline import MeetingPipeline
+from pacer.ai.talk_pipeline import TalkPipeline
 from pacer.ai.routing import Router, get_router
 from pacer.ai.transcription import RecordingStore, Transcriber, WhisperTranscriber
 from pacer.config import get_ai_settings
@@ -40,9 +41,12 @@ from pacer.repositories import (
     GroupRepository,
     MeetingRepository,
     PersonalFileRepository,
+    PersonalTalkRepository,
     ProposedTaskRepository,
     StaffRepository,
+    TalkProposalRepository,
     TaskRepository,
+    TraineeNoteRepository,
     TraineeRepository,
     UnitOfWork,
     get_engine,
@@ -56,12 +60,22 @@ from pacer.repositories.interfaces import (
     GroupRepo,
     MeetingRepo,
     PersonalFileRepo,
+    PersonalTalkRepo,
     ProposedTaskRepo,
     StaffRepo,
+    TalkProposalRepo,
     TaskRepo,
+    TraineeNoteRepo,
     TraineeRepo,
 )
-from pacer.services import ApprovalService, GoalService, MeetingService, TaskService, TraineeService
+from pacer.services import (
+    ApprovalService,
+    GoalService,
+    MeetingService,
+    TalkService,
+    TaskService,
+    TraineeService,
+)
 
 from .errors import NotAuthenticatedError
 
@@ -123,6 +137,18 @@ def get_proposal_repository(session: SessionDep) -> ProposedTaskRepo:
 
 def get_task_repository(session: SessionDep) -> TaskRepo:
     return TaskRepository(session)
+
+
+def get_talk_repository(session: SessionDep) -> PersonalTalkRepo:
+    return PersonalTalkRepository(session)
+
+
+def get_talk_proposal_repository(session: SessionDep) -> TalkProposalRepo:
+    return TalkProposalRepository(session)
+
+
+def get_note_repository(session: SessionDep) -> TraineeNoteRepo:
+    return TraineeNoteRepository(session)
 
 
 # --- who is asking ----------------------------------------------------------------------
@@ -222,6 +248,21 @@ MeetingServiceDep = Annotated[MeetingService, Depends(get_meeting_service)]
 TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]
 
 
+def get_talk_service(
+    talks: Annotated[PersonalTalkRepo, Depends(get_talk_repository)],
+    proposals: Annotated[TalkProposalRepo, Depends(get_talk_proposal_repository)],
+    notes: Annotated[TraineeNoteRepo, Depends(get_note_repository)],
+    trainees: Annotated[TraineeRepo, Depends(get_trainee_repository)],
+    groups: Annotated[GroupRepo, Depends(get_group_repository)],
+    goals: Annotated[GoalRepo, Depends(get_goal_repository)],
+    goal_service: GoalServiceDep,
+) -> TalkService:
+    return TalkService(talks, proposals, notes, trainees, groups, goals, goal_service)
+
+
+TalkServiceDep = Annotated[TalkService, Depends(get_talk_service)]
+
+
 # --- AI ---------------------------------------------------------------------------------------
 
 
@@ -255,3 +296,12 @@ def get_meeting_pipeline(
 
 
 MeetingPipelineDep = Annotated[MeetingPipeline, Depends(get_meeting_pipeline)]
+
+
+def get_talk_pipeline(
+    uow: UnitOfWorkDep, router: Annotated[Router, Depends(get_ai_router)]
+) -> TalkPipeline:
+    return TalkPipeline(uow, router)
+
+
+TalkPipelineDep = Annotated[TalkPipeline, Depends(get_talk_pipeline)]

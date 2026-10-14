@@ -16,15 +16,21 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from pacer.ai.meeting_pipeline import ExtractionResult, IssueCode
+from pacer.ai.issues import Issue, IssueCode
+from pacer.ai.meeting_pipeline import ExtractionResult
+from pacer.ai.talk_pipeline import TalkResult
 from pacer.domain import (
     ApprovalKind,
     ApprovalRequest,
     Goal,
     GoalCategory,
+    NoteKind,
+    PersonalTalk,
     ProposedTask,
     StaffMeeting,
+    TalkProposal,
     Trainee,
+    TraineeNote,
     TraineeStatus,
 )
 
@@ -83,13 +89,34 @@ class MeetingCreate(_Body):
     )
 
 
+class TalkCreate(_Body):
+    held_on: date
+    notes: str = Field(
+        min_length=20,
+        max_length=20_000,
+        description="The counselor's notes from the talk. Stays on this server; only an anonymized "
+        "version reaches the model.",
+    )
+
+
+class NoteCreate(_Body):
+    kind: NoteKind
+    text: str = TraineeNote.model_fields["text"]
+
+
 # --- responses ------------------------------------------------------------------------------
 
 
 class IssueOut(BaseModel):
     code: IssueCode
-    task: int | None = Field(description="Position in the model's list of tasks (1-based); null for the summary")
+    item: int | None = Field(description="Position in the model's list (1-based); null for the summary")
     detail: str
+    section: str | None = Field(default=None, description="Which list, when the answer has several")
+
+
+    @classmethod
+    def of(cls, issue: Issue) -> "IssueOut":
+        return cls(code=issue.code, item=issue.item, detail=issue.detail, section=issue.section)
 
 
 class ProcessResult(BaseModel):
@@ -107,7 +134,7 @@ class ProcessResult(BaseModel):
         return cls(
             meeting=result.meeting,
             proposals=result.proposals,
-            issues=[IssueOut(code=i.code, task=i.task, detail=i.detail) for i in result.issues],
+            issues=[IssueOut.of(i) for i in result.issues],
             prompt=result.prompt_ref,
             attempts=result.attempts,
             cost_usd=result.cost_usd,
@@ -117,3 +144,25 @@ class ProcessResult(BaseModel):
 class RecordingReceived(BaseModel):
     meeting_id: int
     size_bytes: int
+
+
+class SummarizeResult(BaseModel):
+    """What the talk pipeline did: the proposals for the counselor, and what validation changed."""
+
+    talk: PersonalTalk
+    proposals: list[TalkProposal]
+    issues: list[IssueOut] = Field(description="What validation corrected or dropped. Check these")
+    prompt: str
+    attempts: int
+    cost_usd: float | None
+
+    @classmethod
+    def of(cls, result: TalkResult) -> "SummarizeResult":
+        return cls(
+            talk=result.talk,
+            proposals=result.proposals,
+            issues=[IssueOut.of(i) for i in result.issues],
+            prompt=result.prompt_ref,
+            attempts=result.attempts,
+            cost_usd=result.cost_usd,
+        )

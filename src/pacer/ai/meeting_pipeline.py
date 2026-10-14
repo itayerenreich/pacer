@@ -30,7 +30,6 @@ import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
-from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -49,6 +48,7 @@ from .anonymization import (
     load_roster,
     tokens_in,
 )
+from .issues import Issue, IssueCode
 from .prompts import Prompt, load_prompt
 from .routing import AITask, PrivacyViolation, Router
 from .structured import complete_structured
@@ -114,28 +114,6 @@ def extraction_message(transcript: AnonymizedText, held_on: date, participants: 
 
 
 # --- content validation: the model cannot know the world, the database can ------------------------
-
-
-class IssueCode(StrEnum):
-    UNKNOWN_TOKEN = "unknown_token"  # the model wrote a token that was not in what it received
-    OWNER_INVALID = "owner_invalid"  # not a token at all
-    OWNER_AMBIGUOUS = "owner_ambiguous"  # [NAME_n]: the name fits more than one person
-    OWNER_NOT_STAFF = "owner_not_staff"  # a trainee cannot own a staff task
-    OWNER_NOT_PARTICIPANT = "owner_not_participant"
-    DUE_BEFORE_MEETING = "due_before_meeting"
-    DUE_TOO_FAR = "due_too_far"
-    DUPLICATE = "duplicate"
-    DESCRIPTION_SHORTENED = "description_shortened"
-
-
-@dataclass(frozen=True)
-class Issue:
-    """Something validation changed in the model's answer. Tokens and numbers only, never names:
-    issues go to logs and to the API."""
-
-    code: IssueCode
-    task: int | None  # 1-based position in the model's list; None for the summary
-    detail: str
 
 
 @dataclass(frozen=True)

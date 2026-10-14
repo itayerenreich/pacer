@@ -12,6 +12,8 @@ May import from: domain, services, and repository interfaces (Protocols). Must n
     anonymization.py  names -> tokens before any cloud model, and back; AnonymizedText
     transcription.py  local speech-to-text (Whisper) and the folder where recordings wait, then go
     meeting_pipeline.py  staff meeting: transcribe -> anonymize -> extract -> validate -> proposals
+    talk_pipeline.py     personal talk: anonymize -> summarize -> validate -> progress and note proposals
+    issues.py            what content validation corrected, reported with the proposals
     check.py       python -m pacer.ai.check: a harmless connection check
 """
 

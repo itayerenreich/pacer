@@ -95,7 +95,12 @@ def test_validation_issues_reach_the_manager(client, setup):
     setup.cloud.answers = [json.dumps(answer, ensure_ascii=False)]
     body = client.post(f"/meetings/{create(client)}/process", headers=MANAGER).json()
     assert body["issues"] == [
-        {"code": "due_before_meeting", "task": 1, "detail": "2026-01-01 is before the meeting; date cleared"}
+        {
+            "code": "due_before_meeting",
+            "item": 1,
+            "detail": "2026-01-01 is before the meeting; date cleared",
+            "section": None,
+        }
     ]
 
 
