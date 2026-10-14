@@ -12,8 +12,13 @@ from pacer.config import get_settings
 
 @lru_cache
 def get_engine() -> Engine:
-    """The connection pool to PostgreSQL, created once and reused."""
-    return create_engine(get_settings().database_url)
+    """The connection pool to PostgreSQL, created once and reused.
+
+    timezone=UTC: PostgreSQL returns TIMESTAMP WITH TIME ZONE values in the session's
+    time zone. Pinning it to UTC means every time leaves the database in UTC, whatever
+    the server's local zone is (the same instant either way, but one consistent form).
+    """
+    return create_engine(get_settings().database_url, connect_args={"options": "-c timezone=UTC"})
 
 
 @contextmanager
