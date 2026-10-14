@@ -1,6 +1,6 @@
 """AI layer: language model access, prompts, and (next) routing and pipelines.
 
-May import from: domain, services (pipelines build on them). Must not be imported by domain.
+May import from: domain, services, and repository interfaces (Protocols). Must not be imported by domain.
 
     prompts.py     versioned system prompts, loaded from src/pacer/prompts/<name>/vN.md
     llm_client.py  the LLMClient interface, LiteLLMClient, LLMResponse, LLM errors
@@ -9,6 +9,7 @@ May import from: domain, services (pipelines build on them). Must not be importe
     routing.py     which model serves which AI task, and the privacy rule (PERSONAL data stays local)
     structured.py  complete_structured(): JSON that matches a Pydantic model, validated, one correction
     checks.py      the small schema and text used by the connection checks
+    anonymization.py  names -> tokens before any cloud model, and back; AnonymizedText
     check.py       python -m pacer.ai.check: a harmless connection check
 """
 

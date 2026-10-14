@@ -72,6 +72,9 @@ class FakeGroupRepo(_Store[Group]):
 
 
 class FakeTraineeRepo(_Store[Trainee]):
+    def list_all(self) -> list[Trainee]:
+        return self.where()
+
     def list_by_group(self, group_id: int) -> list[Trainee]:
         return self.where(group_id=group_id)
 

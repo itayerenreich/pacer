@@ -32,6 +32,10 @@ class TraineeRepository:
         self._session.flush()
         return trainee
 
+    def list_all(self) -> list[Trainee]:
+        rows = self._session.scalars(select(TraineeRow).order_by(TraineeRow.id))
+        return [_to_domain(row) for row in rows]
+
     def list_by_group(self, group_id: int) -> list[Trainee]:
         rows = self._session.scalars(
             select(TraineeRow).where(TraineeRow.group_id == group_id).order_by(TraineeRow.id)
