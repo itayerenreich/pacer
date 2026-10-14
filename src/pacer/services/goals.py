@@ -1,0 +1,67 @@
+"""Goals and progress: adding goals, updating progress, reading the history."""
+
+from pacer.domain import Goal, GoalUpdate, StaffMember, Trainee
+from pacer.repositories.interfaces import GoalRepo, GoalUpdateRepo, GroupRepo, TraineeRepo
+
+from .errors import RuleViolationError, found
+from .permissions import can_edit_goals, can_view_trainee, require
+
+
+class GoalService:
+    """Every method gets the acting staff member first, checks the rules, then acts.
+
+    The repositories are passed in (dependency injection). In production they are
+    the SQLAlchemy repositories inside one unit_of_work; in unit tests they are
+    in-memory fakes. The service does not know or care which.
+    """
+
+    def __init__(
+        self, goals: GoalRepo, updates: GoalUpdateRepo, trainees: TraineeRepo, groups: GroupRepo
+    ) -> None:
+        self._goals = goals
+        self._updates = updates
+        self._trainees = trainees
+        self._groups = groups
+
+    def add_goal(self, actor: StaffMember, goal: Goal) -> Goal:
+        trainee = self._open_trainee(goal.trainee_id)
+        require(can_edit_goals(actor, trainee), "add goals for this trainee")
+        return self._goals.add(goal)
+
+    def update_progress(self, actor: StaffMember, goal_id: int, progress: int, note: str) -> Goal:
+        """Move a goal to a new progress value, and record who, when, and why.
+
+        The goal row holds the CURRENT state; goal_updates holds every step that led
+        there. Both are written in the caller's unit of work, so either both are
+        saved or neither is.
+        """
+        goal = found(self._goals.get(goal_id), "Goal", goal_id)
+        trainee = self._open_trainee(goal.trainee_id)
+        require(can_edit_goals(actor, trainee), "update this goal")
+
+        updated = goal.with_progress(progress)  # a new object; raises if the goal was dropped
+        self._goals.update(updated)
+        self._updates.add(GoalUpdate(goal_id=goal_id, author_id=actor.id, progress=progress, note=note))
+        return updated
+
+    def list_goals(self, actor: StaffMember, trainee_id: int) -> list[Goal]:
+        self._require_can_view(actor, trainee_id)
+        return self._goals.list_by_trainee(trainee_id)
+
+    def history(self, actor: StaffMember, goal_id: int) -> list[GoalUpdate]:
+        """Every progress update of one goal, oldest first."""
+        goal = found(self._goals.get(goal_id), "Goal", goal_id)
+        self._require_can_view(actor, goal.trainee_id)
+        return self._updates.list_by_goal(goal_id)
+
+    def _open_trainee(self, trainee_id: int) -> Trainee:
+        """The trainee, if their file is still open (not LEFT or GRADUATED)."""
+        trainee = found(self._trainees.get(trainee_id), "Trainee", trainee_id)
+        if trainee.is_closed:
+            raise RuleViolationError(f"Trainee {trainee_id} is {trainee.status}; goals can no longer change")
+        return trainee
+
+    def _require_can_view(self, actor: StaffMember, trainee_id: int) -> None:
+        trainee = found(self._trainees.get(trainee_id), "Trainee", trainee_id)
+        group = found(self._groups.get(trainee.group_id), "Group", trainee.group_id)
+        require(can_view_trainee(actor, group), "view this trainee's goals")

@@ -6,7 +6,18 @@ same methods fits, so service tests can pass a simple in-memory fake.
 
 from typing import Protocol
 
-from pacer.domain import Cohort, Goal, GoalUpdate, Group, PersonalFile, StaffMember, Trainee
+from pacer.domain import (
+    ApprovalKind,
+    ApprovalRequest,
+    ApprovalStatus,
+    Cohort,
+    Goal,
+    GoalUpdate,
+    Group,
+    PersonalFile,
+    StaffMember,
+    Trainee,
+)
 
 
 class StaffRepo(Protocol):
@@ -50,3 +61,13 @@ class GoalRepo(Protocol):
 class GoalUpdateRepo(Protocol):
     def add(self, update: GoalUpdate) -> GoalUpdate: ...
     def list_by_goal(self, goal_id: int) -> list[GoalUpdate]: ...
+
+
+class ApprovalRequestRepo(Protocol):
+    def add(self, request: ApprovalRequest) -> ApprovalRequest: ...
+    def get(self, request_id: int) -> ApprovalRequest | None: ...
+    def update(self, request: ApprovalRequest) -> ApprovalRequest: ...
+    def list_pending(self, requested_by_id: int | None = None) -> list[ApprovalRequest]: ...
+    def exists_with_status(
+        self, *, kind: ApprovalKind, trainee_id: int, requested_by_id: int, status: ApprovalStatus
+    ) -> bool: ...

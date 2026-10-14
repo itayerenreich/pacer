@@ -37,3 +37,14 @@ class GoalStatus(StrEnum):
     IN_PROGRESS = "in_progress"
     ACHIEVED = "achieved"
     DROPPED = "dropped"
+
+
+class ApprovalKind(StrEnum):
+    VIEW_PERSONAL_FILE = "view_personal_file"
+    STATUS_CHANGE = "status_change"  # includes sending a trainee home (-> ON_LEAVE)
+
+
+class ApprovalStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"

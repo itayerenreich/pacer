@@ -1,5 +1,7 @@
 """Trainees and their sensitive personal files."""
 
+from typing import Self
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from .enums import TraineeStatus
@@ -23,6 +25,18 @@ class Trainee(BaseModel):
     @property
     def is_active(self) -> bool:
         return self.status == TraineeStatus.ACTIVE
+
+    @property
+    def is_closed(self) -> bool:
+        """Left or graduated: the file is closed, no new goals or progress."""
+        return self.status in CLOSED_STATUSES
+
+    def with_status(self, status: TraineeStatus) -> Self:
+        """A NEW trainee with this status. self is unchanged (same idea as Goal.with_progress)."""
+        return self.model_validate({**self.model_dump(), "status": status})
+
+
+CLOSED_STATUSES = frozenset({TraineeStatus.LEFT, TraineeStatus.GRADUATED})
 
 
 class PersonalFile(BaseModel):

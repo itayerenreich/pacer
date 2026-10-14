@@ -6,6 +6,7 @@ from typing import Self
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 from .enums import GoalCategory, GoalStatus
+from .errors import DomainRuleError
 
 
 class Goal(BaseModel):
@@ -26,6 +27,23 @@ class Goal(BaseModel):
         if self.status == GoalStatus.ACHIEVED and self.progress != 100:
             raise ValueError("An achieved goal must have progress 100")
         return self
+
+    def with_progress(self, progress: int) -> Self:
+        """A NEW goal at this progress, with the status that matches it. self is unchanged.
+
+        Building a new object (instead of assigning goal.progress = ...) means every
+        rule is checked on the complete new state before anyone can see it. This is
+        how services avoid the known validate_assignment bug (see test_goal.py).
+        """
+        if self.status == GoalStatus.DROPPED:
+            raise DomainRuleError("A dropped goal cannot get progress updates")
+        if progress == 100:
+            status = GoalStatus.ACHIEVED
+        elif progress > 0:
+            status = GoalStatus.IN_PROGRESS
+        else:
+            status = GoalStatus.NOT_STARTED
+        return self.model_validate({**self.model_dump(), "progress": progress, "status": status})
 
 
 class GoalUpdate(BaseModel):
