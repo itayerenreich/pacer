@@ -5,7 +5,7 @@ from datetime import datetime
 import pytest
 from pydantic import ValidationError
 
-from pacer.domain import Goal, GoalStatus
+from pacer.domain import DomainRuleError, Goal, GoalStatus
 
 
 def make_goal(**overrides) -> Goal:
@@ -65,3 +65,33 @@ def test_created_at_is_timezone_aware_utc():
 def test_naive_created_at_is_rejected():
     with pytest.raises(ValidationError):
         make_goal(created_at=datetime(2026, 10, 6, 12, 0))
+
+
+@pytest.mark.parametrize(
+    ("progress", "expected_status"),
+    [(0, GoalStatus.NOT_STARTED), (40, GoalStatus.IN_PROGRESS), (100, GoalStatus.ACHIEVED)],
+)
+def test_with_progress_sets_the_matching_status(progress, expected_status):
+    updated = make_goal().with_progress(progress)
+    assert updated.progress == progress
+    assert updated.status is expected_status
+
+
+def test_with_progress_leaves_the_original_unchanged():
+    goal = make_goal(status="in_progress", progress=60)
+    goal.with_progress(100)
+    assert goal.progress == 60
+    assert goal.status is GoalStatus.IN_PROGRESS
+
+
+def test_with_invalid_progress_is_rejected_and_original_kept():
+    """The way services update goals does not have the validate_assignment bug above."""
+    goal = make_goal(progress=60, status="in_progress")
+    with pytest.raises(ValidationError):
+        goal.with_progress(150)
+    assert goal.progress == 60
+
+
+def test_dropped_goal_cannot_progress():
+    with pytest.raises(DomainRuleError):
+        make_goal(status="dropped").with_progress(50)
