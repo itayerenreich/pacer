@@ -93,3 +93,19 @@ class GoalUpdateRow(Base):
     progress: Mapped[int]
     note: Mapped[str] = mapped_column(String(1000))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ApprovalRequestRow(Base):
+    __tablename__ = "approval_requests"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(30))
+    trainee_id: Mapped[int] = mapped_column(ForeignKey("trainees.id"), index=True)
+    requested_by_id: Mapped[int] = mapped_column(ForeignKey("staff_members.id"), index=True)
+    reason: Mapped[str] = mapped_column(String(1000))
+    requested_status: Mapped[str | None] = mapped_column(String(20))
+    status: Mapped[str] = mapped_column(String(20), index=True)
+    decided_by_id: Mapped[int | None] = mapped_column(ForeignKey("staff_members.id"))
+    decision_note: Mapped[str | None] = mapped_column(String(1000))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
