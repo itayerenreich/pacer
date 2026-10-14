@@ -28,8 +28,11 @@ from pacer.repositories import (
     GoalRepository,
     GoalUpdateRepository,
     GroupRepository,
+    MeetingRepository,
     PersonalFileRepository,
+    ProposedTaskRepository,
     StaffRepository,
+    TaskRepository,
     TraineeRepository,
     get_engine,
     unit_of_work,
@@ -39,11 +42,14 @@ from pacer.repositories.interfaces import (
     GoalRepo,
     GoalUpdateRepo,
     GroupRepo,
+    MeetingRepo,
     PersonalFileRepo,
+    ProposedTaskRepo,
     StaffRepo,
+    TaskRepo,
     TraineeRepo,
 )
-from pacer.services import ApprovalService, GoalService, TraineeService
+from pacer.services import ApprovalService, GoalService, MeetingService, TaskService, TraineeService
 
 from .errors import NotAuthenticatedError
 
@@ -93,6 +99,18 @@ def get_goal_update_repository(session: SessionDep) -> GoalUpdateRepo:
 
 def get_approval_repository(session: SessionDep) -> ApprovalRequestRepo:
     return ApprovalRequestRepository(session)
+
+
+def get_meeting_repository(session: SessionDep) -> MeetingRepo:
+    return MeetingRepository(session)
+
+
+def get_proposal_repository(session: SessionDep) -> ProposedTaskRepo:
+    return ProposedTaskRepository(session)
+
+
+def get_task_repository(session: SessionDep) -> TaskRepo:
+    return TaskRepository(session)
 
 
 # --- who is asking ----------------------------------------------------------------------
@@ -155,3 +173,20 @@ def get_approval_service(
 GoalServiceDep = Annotated[GoalService, Depends(get_goal_service)]
 TraineeServiceDep = Annotated[TraineeService, Depends(get_trainee_service)]
 ApprovalServiceDep = Annotated[ApprovalService, Depends(get_approval_service)]
+
+
+def get_meeting_service(
+    meetings: Annotated[MeetingRepo, Depends(get_meeting_repository)],
+    proposals: Annotated[ProposedTaskRepo, Depends(get_proposal_repository)],
+    tasks: Annotated[TaskRepo, Depends(get_task_repository)],
+    staff: Annotated[StaffRepo, Depends(get_staff_repository)],
+) -> MeetingService:
+    return MeetingService(meetings, proposals, tasks, staff)
+
+
+def get_task_service(tasks: Annotated[TaskRepo, Depends(get_task_repository)]) -> TaskService:
+    return TaskService(tasks)
+
+
+MeetingServiceDep = Annotated[MeetingService, Depends(get_meeting_service)]
+TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]

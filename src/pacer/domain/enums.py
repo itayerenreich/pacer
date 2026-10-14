@@ -48,3 +48,25 @@ class ApprovalStatus(StrEnum):
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
+
+
+class MeetingStatus(StrEnum):
+    """Where a staff meeting is in the AI pipeline (task 6 moves it along)."""
+
+    UPLOADED = "uploaded"  # audio received, not transcribed yet
+    TRANSCRIBED = "transcribed"  # we have the text (or it was uploaded as text)
+    ANONYMIZED = "anonymized"  # names replaced by tokens
+    EXTRACTED = "extracted"  # the model proposed a summary and tasks
+    PENDING_APPROVAL = "pending_approval"  # proposals validated, waiting for the manager
+    APPROVED = "approved"  # every proposal was approved or rejected
+
+
+class ProposalStatus(StrEnum):
+    PROPOSED = "proposed"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class TaskStatus(StrEnum):
+    OPEN = "open"
+    DONE = "done"

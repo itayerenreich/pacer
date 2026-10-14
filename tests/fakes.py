@@ -20,8 +20,12 @@ from pacer.domain import (
     GoalUpdate,
     Group,
     PersonalFile,
+    ProposalStatus,
+    ProposedTask,
+    StaffMeeting,
     StaffMember,
     StaffRole,
+    Task,
     Trainee,
 )
 
@@ -110,6 +114,27 @@ class FakeApprovalRequestRepo(_Store[ApprovalRequest]):
         )
 
 
+class FakeMeetingRepo(_Store[StaffMeeting]):
+    def list_all(self) -> list[StaffMeeting]:
+        return sorted(self.where(), key=lambda m: m.held_on, reverse=True)
+
+
+class FakeProposedTaskRepo(_Store[ProposedTask]):
+    def list_by_meeting(self, meeting_id: int) -> list[ProposedTask]:
+        return self.where(meeting_id=meeting_id)
+
+    def count_open(self, meeting_id: int) -> int:
+        return len(self.where(meeting_id=meeting_id, status=ProposalStatus.PROPOSED))
+
+
+class FakeTaskRepo(_Store[Task]):
+    def list_by_owner(self, owner_id: int) -> list[Task]:
+        return self.where(owner_id=owner_id)
+
+    def list_all(self) -> list[Task]:
+        return self.where()
+
+
 @dataclass
 class World:
     """A small academy for service tests.
@@ -126,6 +151,9 @@ class World:
     goals: FakeGoalRepo = field(default_factory=FakeGoalRepo)
     goal_updates: FakeGoalUpdateRepo = field(default_factory=FakeGoalUpdateRepo)
     approvals: FakeApprovalRequestRepo = field(default_factory=FakeApprovalRequestRepo)
+    meetings: FakeMeetingRepo = field(default_factory=FakeMeetingRepo)
+    proposals: FakeProposedTaskRepo = field(default_factory=FakeProposedTaskRepo)
+    tasks: FakeTaskRepo = field(default_factory=FakeTaskRepo)
 
     def __post_init__(self) -> None:
         self.manager = self.staff.add(StaffMember(full_name="Ronit Manager", role=StaffRole.MANAGER))
