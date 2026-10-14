@@ -6,8 +6,9 @@
     result.cost_usd       # all attempts together
 
 How a call goes:
-1. The JSON Schema of the Pydantic model goes to the provider as a hint (Claude constrains its
-   answer to it), and also into the message, so models without native support see it too.
+1. The JSON Schema of the Pydantic model goes to the provider (Claude constrains its answer to
+   it). A model WITHOUT native support (llama3.2) gets the schema inside the message instead.
+   Not both: for Claude that sent the schema twice and doubled the input tokens of a call.
 2. The answer is parsed and validated against the FULL Pydantic model. This is the guarantee:
    the provider cannot enforce every rule (Claude rejects minLength, maximum...), Pydantic can.
 3. If validation fails, ONE more attempt: the model gets the exact errors and corrects itself.
@@ -37,6 +38,11 @@ Answer with ONE JSON object that matches this JSON Schema exactly.
 No text before or after the JSON, no Markdown fences.
 
 {schema}"""
+
+NATIVE_FORMAT_INSTRUCTIONS = """
+
+---
+Answer with ONE JSON object that matches the response schema you were given."""
 
 CORRECTION = """
 
@@ -84,7 +90,10 @@ def complete_structured[T: BaseModel](
     max_tokens: int = 2048,
 ) -> StructuredResult[T]:
     json_schema = schema.model_json_schema()
-    request = user_message + FORMAT_INSTRUCTIONS.format(schema=json.dumps(json_schema, ensure_ascii=False))
+    if client.native_schema:
+        request = user_message + NATIVE_FORMAT_INSTRUCTIONS
+    else:
+        request = user_message + FORMAT_INSTRUCTIONS.format(schema=json.dumps(json_schema, ensure_ascii=False))
     responses: list[LLMResponse] = []
     reasons: list[str] = []
 

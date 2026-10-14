@@ -222,3 +222,16 @@ def test_a_whole_name_wins_over_prefix_plus_a_shorter_name():
     anonymizer = Anonymizer(Roster([Person(T, 1, "מאור", "דהן"), Person(T, 2, "אור", "שלו")]))
     assert anonymizer.anonymize("מאור ואור").text == "[TRAINEE_1] ו[TRAINEE_2]"
     assert anonymizer.anonymize("למאור").text == "ל[TRAINEE_1]"
+
+
+def test_known_people_map_back_even_when_the_text_never_names_them(anonymizer):
+    noa = Person(S, 2, "נועה", "לוי")
+    safe = anonymizer.anonymize("צריך לתאם הסעה", known=[noa])
+    assert safe.text == "צריך לתאם הסעה"
+    assert deanonymize("[STAFF_2] תתאם", safe) == "נועה לוי תתאם"
+
+
+def test_the_roster_finds_a_person_by_kind_and_id():
+    roster = Roster(PEOPLE)
+    assert roster.find(S, 2).first_name == "נועה"
+    assert roster.find(T, 2) is None  # id 2 is a staff member, not a trainee

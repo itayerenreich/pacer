@@ -7,9 +7,11 @@ and that no personal data reached a model that is not local.
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from pacer.ai import LLMResponse, Prompt
+from pacer.ai.routing import ModelSpec, Router
 
 
 @dataclass
@@ -25,8 +27,10 @@ class FakeLLMClient:
     """answers: a list returned in order (the last one repeats), or a function of the user message."""
 
     answers: list[str] | Callable[[str], str] = field(default_factory=lambda: ["תשובה לדוגמה"])
+    # A function may also raise, to simulate a provider error (e.g. LLMUnavailableError).
     model: str = "fake/model"
     runs_locally: bool = True
+    native_schema: bool = False  # True: like Claude, the schema goes to the "provider", not the message
     calls: list[Call] = field(default_factory=list)
 
     truncated: bool = False  # set True to simulate an answer cut off at max_tokens
@@ -56,3 +60,36 @@ class FakeLLMClient:
             latency_ms=0,
             truncated=self.truncated,
         )
+
+
+def fake_router(cloud: FakeLLMClient, local: FakeLLMClient | None = None) -> Router:
+    """The real Router (with all its privacy checks), with fakes in place of the real models.
+
+    `cloud` must say runs_locally=False, as Claude would: the router checks every client against
+    the table, so a fake cannot pretend to be local and slip past the privacy rule.
+    """
+    local = local or FakeLLMClient(model="fake/local", runs_locally=True)
+    return Router(
+        models={
+            "claude-haiku": ModelSpec(runs_locally=False, make_client=lambda: cloud),
+            "claude-sonnet": ModelSpec(runs_locally=False, make_client=lambda: cloud),
+            "local-small": ModelSpec(runs_locally=True, make_client=lambda: local),
+        }
+    )
+
+
+@dataclass
+class FakeTranscriber:
+    """Speech to text without a model: returns `text`, or raises `error`. Records each file it got."""
+
+    text: str = ""
+    error: Exception | None = None
+    runs_locally: bool = True
+    calls: list[Path] = field(default_factory=list)
+
+    def transcribe(self, audio: Path) -> str:
+        assert audio.exists(), "the recording must exist while it is transcribed"
+        self.calls.append(audio)
+        if self.error is not None:
+            raise self.error
+        return self.text

@@ -40,6 +40,8 @@ TASK_TRANSITIONS: dict[TaskStatus, frozenset[TaskStatus]] = {
 }
 
 _ORDER = list(MeetingStatus)
+DESCRIPTION_MAX_LENGTH = 300  # a task's description, from the model's proposal to the real Task
+TRANSCRIPT_MIN_LENGTH = 20
 
 
 def _now() -> datetime:
@@ -56,7 +58,7 @@ class StaffMeeting(BaseModel):
     participant_ids: list[int] = Field(min_length=1)
     status: MeetingStatus = MeetingStatus.UPLOADED
     # Raw text: PERSONAL data. Stays in the local database; never sent to a cloud model.
-    transcript: str | None = Field(default=None, min_length=20, repr=False)
+    transcript: str | None = Field(default=None, min_length=TRANSCRIPT_MIN_LENGTH, repr=False)
     # Names replaced by tokens: the only form a cloud model may see.
     anonymized_transcript: str | None = Field(default=None, repr=False)
     summary: str | None = Field(default=None, repr=False)
@@ -89,7 +91,7 @@ class ProposedTask(BaseModel):
 
     id: int | None = None
     meeting_id: int
-    description: str = Field(min_length=5, max_length=300)
+    description: str = Field(min_length=5, max_length=DESCRIPTION_MAX_LENGTH)
     owner_id: int | None = None  # None when the model's answer named no one we could resolve
     due_date: date | None = None
     status: ProposalStatus = ProposalStatus.PROPOSED
@@ -143,7 +145,7 @@ class Task(BaseModel):
     model_config = ConfigDict(validate_assignment=True)
 
     id: int | None = None
-    description: str = Field(min_length=5, max_length=300)
+    description: str = Field(min_length=5, max_length=DESCRIPTION_MAX_LENGTH)
     owner_id: int
     due_date: date | None = None
     status: TaskStatus = TaskStatus.OPEN

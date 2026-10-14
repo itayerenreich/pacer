@@ -113,6 +113,7 @@ class Roster:
             {form: frozenset(people) for form, people in sorted(forms.items(), key=lambda kv: -len(kv[0]))}
         )
         alternatives = "|".join(r"\s+".join(map(re.escape, form.split())) for form in self.forms)
+        self._by_key = {(person.kind, person.id): person for person in self.people}
         self.pattern = re.compile(
             rf"{_NOT_WORD_BEFORE}(?P<prefix>[{PREFIX_LETTERS}]{{0,3}}?)(?P<name>{alternatives}){_NOT_WORD_AFTER}"
             if alternatives
@@ -120,12 +121,18 @@ class Roster:
         )
 
 
+    def find(self, kind: PersonKind, person_id: int) -> Person | None:
+        return self._by_key.get((kind, person_id))
+
+
 class Anonymizer:
     def __init__(self, roster: Roster) -> None:
         self._roster = roster
 
-    def anonymize(self, text: str) -> AnonymizedText:
-        people: dict[str, Person] = {}
+    def anonymize(self, text: str, *, known: Iterable[Person] = ()) -> AnonymizedText:
+        """known: people the model is told about by token even if the text never names them
+        (e.g. the participants of a meeting), so their tokens in the answer can be mapped back."""
+        people: dict[str, Person] = {person.token: person for person in known}
         unresolved: dict[str, str] = {}
         ambiguous_tokens: dict[str, str] = {}  # the same ambiguous word gets the same token
 

@@ -6,6 +6,6 @@ May import from: domain, repositories.
     uv run python -m pacer.demo --reset    # empty every table first, then fill
 """
 
-from .academy import Repos, Summary, build_academy
+from .academy import Summary, build_academy
 
-__all__ = ["Repos", "Summary", "build_academy"]
+__all__ = ["Summary", "build_academy"]

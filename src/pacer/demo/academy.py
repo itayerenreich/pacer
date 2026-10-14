@@ -16,8 +16,6 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy.orm import Session
-
 from pacer.domain import (
     ApprovalKind,
     ApprovalRequest,
@@ -34,26 +32,7 @@ from pacer.domain import (
     Trainee,
     TraineeStatus,
 )
-from pacer.repositories import (
-    ApprovalRequestRepository,
-    CohortRepository,
-    GoalRepository,
-    GoalUpdateRepository,
-    GroupRepository,
-    PersonalFileRepository,
-    StaffRepository,
-    TraineeRepository,
-)
-from pacer.repositories.interfaces import (
-    ApprovalRequestRepo,
-    CohortRepo,
-    GoalRepo,
-    GoalUpdateRepo,
-    GroupRepo,
-    PersonalFileRepo,
-    StaffRepo,
-    TraineeRepo,
-)
+from pacer.repositories import Repos
 
 from . import content
 
@@ -61,33 +40,6 @@ TRAINEE_COUNT = 35
 COHORT_START = date(2026, 9, 1)
 COHORT_END = date(2027, 6, 30)
 FIRST_DAY = datetime(2026, 9, 1, 9, 0, tzinfo=UTC)
-
-
-@dataclass
-class Repos:
-    """Every repository the builder writes to."""
-
-    staff: StaffRepo
-    cohorts: CohortRepo
-    groups: GroupRepo
-    trainees: TraineeRepo
-    personal_files: PersonalFileRepo
-    goals: GoalRepo
-    goal_updates: GoalUpdateRepo
-    approvals: ApprovalRequestRepo
-
-    @classmethod
-    def from_session(cls, session: Session) -> "Repos":
-        return cls(
-            staff=StaffRepository(session),
-            cohorts=CohortRepository(session),
-            groups=GroupRepository(session),
-            trainees=TraineeRepository(session),
-            personal_files=PersonalFileRepository(session),
-            goals=GoalRepository(session),
-            goal_updates=GoalUpdateRepository(session),
-            approvals=ApprovalRequestRepository(session),
-        )
 
 
 @dataclass

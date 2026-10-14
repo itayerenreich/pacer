@@ -26,6 +26,18 @@ class MeetingRepository:
         row = self._session.get(StaffMeetingRow, meeting_id)
         return None if row is None else self._to_domain(row)
 
+    def lock(self, meeting_id: int) -> StaffMeeting | None:
+        """SELECT ... FOR UPDATE: a second transaction that locks the same meeting waits here until
+        the first one commits, and then reads the meeting as the first one left it. This is what
+        makes "check the status, then write" safe when two requests process the same meeting."""
+        row = self._session.scalars(
+            select(StaffMeetingRow)
+            .where(StaffMeetingRow.id == meeting_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)  # re-read, even if this session saw it before
+        ).first()
+        return None if row is None else self._to_domain(row)
+
     def update(self, meeting: StaffMeeting) -> StaffMeeting:
         row = self._session.get(StaffMeetingRow, meeting.id)
         if row is None:

@@ -11,10 +11,10 @@ import sys
 from sqlalchemy import Engine, text
 
 from pacer.logging_config import configure_logging
-from pacer.repositories import get_engine, unit_of_work
+from pacer.repositories import get_engine, repositories
 from pacer.repositories.tables import Base, StaffMemberRow
 
-from .academy import Repos, Summary, build_academy
+from .academy import Summary, build_academy
 
 log = logging.getLogger("pacer.demo")  # not "__main__" when run with -m
 
@@ -42,8 +42,8 @@ def load(engine: Engine, *, reset: bool, seed: int) -> Summary:
             "The database already has data. Run with --reset to replace it (deletes everything)."
         )
 
-    with unit_of_work(engine) as session:  # all or nothing: a failure leaves the database untouched
-        return build_academy(Repos.from_session(session), seed=seed)
+    with repositories(engine) as repos:  # all or nothing: a failure leaves the database untouched
+        return build_academy(repos, seed=seed)
 
 
 def print_summary(summary: Summary) -> None:

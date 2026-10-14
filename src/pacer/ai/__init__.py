@@ -10,6 +10,8 @@ May import from: domain, services, and repository interfaces (Protocols). Must n
     structured.py  complete_structured(): JSON that matches a Pydantic model, validated, one correction
     checks.py      the small schema and text used by the connection checks
     anonymization.py  names -> tokens before any cloud model, and back; AnonymizedText
+    transcription.py  local speech-to-text (Whisper) and the folder where recordings wait, then go
+    meeting_pipeline.py  staff meeting: transcribe -> anonymize -> extract -> validate -> proposals
     check.py       python -m pacer.ai.check: a harmless connection check
 """
 

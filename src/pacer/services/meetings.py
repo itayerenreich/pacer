@@ -22,7 +22,7 @@ from pacer.domain import (
     StaffMember,
     Task,
 )
-from pacer.domain.meeting import PROPOSAL_TRANSITIONS
+from pacer.domain.meeting import DESCRIPTION_MAX_LENGTH, PROPOSAL_TRANSITIONS
 from pacer.domain.state import require_transition
 from pacer.repositories.interfaces import MeetingRepo, ProposedTaskRepo, StaffRepo, TaskRepo
 
@@ -35,7 +35,7 @@ log = logging.getLogger(__name__)
 class TaskDraft(BaseModel):
     """One task as the pipeline proposes it, before it is stored as a ProposedTask."""
 
-    description: str = Field(min_length=5, max_length=300)
+    description: str = Field(min_length=5, max_length=DESCRIPTION_MAX_LENGTH)
     owner_id: int | None = None
     due_date: date | None = None
 
@@ -45,7 +45,7 @@ class ProposalEdits(BaseModel):
 
     model_config = ConfigDict(extra="forbid")  # not status, not task_id: only these three
 
-    description: str | None = Field(default=None, min_length=5, max_length=300)
+    description: str | None = Field(default=None, min_length=5, max_length=DESCRIPTION_MAX_LENGTH)
     owner_id: int | None = None
     due_date: date | None = None
 
