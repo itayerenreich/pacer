@@ -190,11 +190,19 @@ class TalkService:
     # --- helpers ----------------------------------------------------------------------------------
 
     def _decidable(self, actor: StaffMember, proposal_id: int) -> tuple[TalkProposal, PersonalTalk]:
+        """The proposal, still open, with its talk LOCKED for the rest of this transaction.
+
+        Talk first, then proposal, the same order everywhere (as in MeetingService): decisions on
+        one talk run one after the other, so a double click cannot add a second note or a second
+        GoalUpdate, and deciding the last two proposals at once still closes the talk.
+        """
         proposal = found(self._proposals.get(proposal_id), "Talk proposal", proposal_id)
         talk = found(self._talks.get(proposal.talk_id), "Talk", proposal.talk_id)
         trainee = self._open_trainee(talk.trainee_id)
         require(can_edit_goals(actor, trainee), "decide on proposals about this trainee")
-        # Still open? Checked BEFORE anything is created (a second approve must not add a second note).
+        talk = self._talks.lock(talk.id)
+        proposal = self._proposals.lock(proposal_id)  # re-read now that no one else can decide
+        # Still open? Checked BEFORE anything is created.
         require_transition(TALK_PROPOSAL_TRANSITIONS, proposal.status, ProposalStatus.APPROVED, "proposal")
         return proposal, talk
 

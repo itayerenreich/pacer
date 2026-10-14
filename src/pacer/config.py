@@ -15,7 +15,9 @@ class Settings(BaseSettings):
     postgres_db: str
     postgres_host: str = "localhost"
     postgres_port: int = 5432
-    sql_echo: bool = False  # SQL_ECHO=true in .env prints every SQL statement (debugging)
+    # SQL_ECHO=true in .env prints every SQL statement (debugging). It prints the values too, which
+    # include transcripts and talk notes: development with demo data only, never with real data.
+    sql_echo: bool = False
 
     @property
     def database_url(self) -> str:

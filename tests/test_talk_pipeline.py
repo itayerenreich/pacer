@@ -93,7 +93,7 @@ def test_the_model_gets_the_pinned_prompt_the_schema_and_the_route_budget(uow, i
     [call] = cloud.calls
     assert call.prompt.ref == "talk_summary@v1"
     assert call.response_schema == TalkExtraction.model_json_schema()
-    assert call.max_tokens == 2000  # ROUTES[SUMMARIZE_TALK]
+    assert call.max_tokens == 4000  # ROUTES[SUMMARIZE_TALK]: room for long Hebrew answers
 
 
 def test_the_message_has_the_goals_by_id_and_who_the_talk_was_with(uow, itai, cloud):
@@ -252,7 +252,7 @@ def test_one_update_per_goal(source, goals):
 
 
 def test_progress_can_go_down_after_a_setback(source, goals):
-    result = validate(source, goals, progress=[{"goal_id": 63, "progress": 10, "reason": "נפסקה הריצה"}], notes=[])
+    result = validate(source, goals, progress=[{"goal_id": 63, "progress": 10, "reason": "הפסיקה לרוץ השבוע"}], notes=[])
     assert result.drafts[0].progress == 10 and result.issues == []
 
 
@@ -263,7 +263,7 @@ def test_a_note_about_health_never_becomes_memory(source, goals):
     ]
     result = validate(source, goals, progress=[], notes=notes)
     assert [d.text for d in result.drafts] == ["יעד קטן ומדיד עוזר לה"]
-    assert codes(result) == [(IssueCode.SENSITIVE_NOTE, "notes", 1)]
+    assert codes(result) == [(IssueCode.SENSITIVE_TEXT, "notes", 1)]
     assert "ראש" not in result.issues[0].detail and "רופא" not in result.issues[0].detail
 
 
@@ -281,7 +281,17 @@ def test_an_invented_token_is_reported_where_it_is(source, goals):
 
 @pytest.mark.parametrize(
     "text",
-    ["הלכה לרופא", "וכאבי ראש", "יש לו ADHD", "מאובחן עם הפרעת קשב", "מקבלת תרופות", "בגלל הפציעה", "חרדה לפני מבחנים"],
+    [
+        "הלכה לרופא",
+        "וכאבי ראש",
+        "יש לו ADHD",
+        "מאובחן עם הפרעת קשב",
+        "אובחנה השנה",
+        "מקבלת תרופות",
+        "טיפול תרופתי",
+        "בגלל הפציעה",
+        "חרדה לפני מבחנים",
+    ],
 )
 def test_sensitive_words_are_found_with_prefixes(text):
     assert is_sensitive(text)
@@ -292,3 +302,12 @@ def test_sensitive_words_are_found_with_prefixes(text):
 )
 def test_everyday_words_are_not_sensitive(text):
     assert not is_sensitive(text)
+
+
+def test_a_progress_reason_about_health_is_not_kept_either(source, goals):
+    """An approved reason becomes the GoalUpdate's note, forever: the same rule as notes."""
+    hurt = [{"goal_id": 63, "progress": 10, "reason": "נפצעה בברך ולא רצה השבוע"}]
+    result = validate(source, goals, progress=hurt, notes=[])
+    assert result.drafts == []
+    assert codes(result) == [(IssueCode.SENSITIVE_TEXT, "progress", 1)]
+    assert "ברך" not in result.issues[0].detail

@@ -77,7 +77,7 @@ ROUTES: Mapping[AITask, Route] = MappingProxyType(
         AITask.CONNECTION_CHECK: Route("claude-haiku", Sensitivity.PUBLIC, max_tokens=200),
         AITask.STRUCTURED_CHECK: Route("claude-haiku", Sensitivity.PUBLIC, max_tokens=500),
         AITask.EXTRACT_MEETING: Route("claude-haiku", Sensitivity.ANONYMIZED, max_tokens=4000),
-        AITask.SUMMARIZE_TALK: Route("claude-haiku", Sensitivity.ANONYMIZED, max_tokens=2000),
+        AITask.SUMMARIZE_TALK: Route("claude-haiku", Sensitivity.ANONYMIZED, max_tokens=4000),
         AITask.SYNTHETIC_DATA: Route("claude-sonnet", Sensitivity.PUBLIC, max_tokens=8000),
     }
 )

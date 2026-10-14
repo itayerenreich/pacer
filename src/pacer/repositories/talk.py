@@ -65,6 +65,16 @@ class TalkProposalRepository:
         row = self._session.get(TalkProposalRow, proposal_id)
         return None if row is None else TalkProposal.model_validate(row, from_attributes=True)
 
+    def lock(self, proposal_id: int) -> TalkProposal | None:
+        """SELECT ... FOR UPDATE, re-read even if this session saw the row before."""
+        row = self._session.scalars(
+            select(TalkProposalRow)
+            .where(TalkProposalRow.id == proposal_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        ).first()
+        return None if row is None else TalkProposal.model_validate(row, from_attributes=True)
+
     def update(self, proposal: TalkProposal) -> TalkProposal:
         row = self._session.get(TalkProposalRow, proposal.id)
         if row is None:

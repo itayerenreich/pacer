@@ -1,5 +1,8 @@
 """Talks, talk proposals and notes against PostgreSQL: the fourth migration, and the counselor flow."""
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 from fake_llm import FakeLLMClient, fake_router
 from fastapi.testclient import TestClient
@@ -80,3 +83,74 @@ def test_hebrew_notes_round_trip(academy):
     with repositories(academy) as repos:
         assert repos.talks.get(talk.id).notes == MAYA.notes
         assert repos.talks.list_by_trainee(MAYA.trainee_id)[0].id == talk.id
+
+
+# --- the counselor's decisions, at the same moment (as for meetings) -----------------------------------
+
+
+def _summarized(engine) -> list[int]:
+    from pacer.ai.talk_pipeline import TalkPipeline, talk_service
+
+    with repositories(engine) as repos:
+        itai = repos.staff.get(5)
+        talk_id = talk_service(repos).record_talk(itai, MAYA.trainee_id, held_on=MAYA.held_on, notes=MAYA.notes).id
+    cloud = FakeLLMClient(answers=[reply()], runs_locally=False)
+    result = TalkPipeline(lambda: repositories(engine), fake_router(cloud)).summarize(itai, talk_id)
+    return [p.id for p in result.proposals]  # progress, worked, did_not_work, follow_up
+
+
+def _decide(engine, action: str, proposal_id: int):
+    from pacer.ai.talk_pipeline import talk_service
+
+    with repositories(engine) as repos:
+        return getattr(talk_service(repos), f"{action}_proposal")(repos.staff.get(5), proposal_id)
+
+
+def test_approving_the_same_note_twice_at_once_adds_one_note(academy, monkeypatch):
+    from pacer.repositories import TraineeNoteRepository
+
+    note_proposal = _summarized(academy)[1]
+    inside = threading.Event()
+    real_add = TraineeNoteRepository.add
+
+    def slow_add(self, note):
+        saved = real_add(self, note)
+        if not inside.is_set():
+            inside.set()
+            threading.Event().wait(0.7)  # the first request holds its transaction open
+        return saved
+
+    monkeypatch.setattr(TraineeNoteRepository, "add", slow_add)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(_decide, academy, "approve", note_proposal)
+        assert inside.wait(10)
+        second = pool.submit(_decide, academy, "approve", note_proposal)
+    assert first.exception() is None and second.exception() is not None
+    with repositories(academy) as repos:
+        assert len(repos.notes.list_by_trainee(MAYA.trainee_id)) == 1
+
+
+def test_deciding_the_last_two_proposals_at_once_still_closes_the_talk(academy, monkeypatch):
+    from pacer.repositories import TalkProposalRepository
+
+    progress, worked, did_not_work, follow_up = _summarized(academy)
+    _decide(academy, "reject", progress)
+    _decide(academy, "reject", worked)
+    before_counting = threading.Barrier(2, timeout=1.5)
+    real_count = TalkProposalRepository.count_open
+
+    def count_together(self, talk_id):
+        try:
+            before_counting.wait()
+        except threading.BrokenBarrierError:
+            pass
+        return real_count(self, talk_id)
+
+    monkeypatch.setattr(TalkProposalRepository, "count_open", count_together)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        a = pool.submit(_decide, academy, "approve", did_not_work)
+        b = pool.submit(_decide, academy, "reject", follow_up)
+    assert a.exception() is None and b.exception() is None
+    with repositories(academy) as repos:
+        talk_id = repos.talk_proposals.get(follow_up).talk_id
+        assert repos.talks.get(talk_id).status is TalkStatus.REVIEWED

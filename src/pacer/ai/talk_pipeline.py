@@ -13,8 +13,9 @@ The same three rules as the meeting pipeline (see meeting_pipeline.py):
    an ambiguous first name in their own talk is them.
 3. The model proposes, code checks, a person decides. Content validation here: the goal must be
    one of this trainee's goals and still open, the progress must change something, no duplicates,
-   and no note about health or a diagnosis is ever proposed as memory (a word list, as a second
-   line of defense behind the prompt).
+   and nothing about health or a diagnosis is ever proposed to be kept, neither as a note nor as
+   a progress reason (which becomes a permanent GoalUpdate note): a word list, as a second line
+   of defense behind the prompt.
 """
 
 import logging
@@ -134,10 +135,10 @@ def anonymize_talk(
 # line of defense, in code. Whole words, with Hebrew prefix letters. Over-matching is fine: a note
 # that is dropped by mistake is easy for the counselor to write by hand.
 _SENSITIVE_WORDS = (
-    "רופא רופאה רופאים תרופה תרופות כאב כאבי כאבים כואב כואבת מחלה מחלות חולה חולים "
-    "אבחנה אבחון מאובחן מאובחנת הפרעה הפרעת הפרעות קשב דיכאון חרדה חרדות "
-    "פסיכולוג פסיכולוגית פסיכיאטר פסיכיאטרית ריטלין אשפוז מאושפז מאושפזת "
-    "פציעה פצוע פצועה נפצע נפצעה תסמונת בריאות בריאותי בריאותית ADHD"
+    "רופא רופאה רופאים תרופה תרופות תרופתי תרופתית כאב כאבי כאבים כואב כואבת מחלה מחלות חולה חולים "
+    "אבחנה אבחנות אבחון אובחן אובחנה אובחנו מאובחן מאובחנת הפרעה הפרעת הפרעות קשב דיכאון "
+    "חרדה חרדות פסיכולוג פסיכולוגית פסיכולוגי פסיכיאטר פסיכיאטרית ריטלין אשפוז אושפז אושפזה "
+    "מאושפז מאושפזת פציעה פצוע פצועה נפצע נפצעה תסמונת בריאות בריאותי בריאותית ADHD"
 ).split()
 _SENSITIVE = re.compile(rf"(?<!\w)[ובכלמשה]{{0,3}}(?:{'|'.join(_SENSITIVE_WORDS)})(?!\w)", re.IGNORECASE)
 
@@ -185,6 +186,9 @@ def validate_talk(extraction: TalkExtraction, source: AnonymizedText, *, goals: 
         if goal.id in seen_goals:
             issues.append(Issue(IssueCode.DUPLICATE, number, f"goal {goal.id} twice; kept the first", "progress"))
             continue
+        if is_sensitive(suggestion.reason):  # the reason would stay forever in the goal's history
+            issues.append(Issue(IssueCode.SENSITIVE_TEXT, number, f"goal {goal.id}: health or diagnosis; not kept", "progress"))
+            continue
         seen_goals.add(goal.id)
         reason = restore(suggestion.reason, number, "progress", REASON_MAX_LENGTH)
         drafts.append(
@@ -194,7 +198,7 @@ def validate_talk(extraction: TalkExtraction, source: AnonymizedText, *, goals: 
     seen_notes: set[str] = set()
     for number, suggestion in enumerate(extraction.notes, start=1):
         if is_sensitive(suggestion.text):  # the detail says nothing about what the note said
-            issues.append(Issue(IssueCode.SENSITIVE_NOTE, number, "health or diagnosis; not kept", "notes"))
+            issues.append(Issue(IssueCode.SENSITIVE_TEXT, number, "health or diagnosis; not kept", "notes"))
             continue
         text = restore(suggestion.text, number, "notes", NOTE_MAX_LENGTH)
         if text.casefold() in seen_notes:

@@ -160,6 +160,9 @@ class FakeTalkRepo(_Store[PersonalTalk]):
 
 
 class FakeTalkProposalRepo(_Store[TalkProposal]):
+    def lock(self, proposal_id: int) -> TalkProposal | None:
+        return self.get(proposal_id)
+
     def list_by_talk(self, talk_id: int) -> list[TalkProposal]:
         return self.where(talk_id=talk_id)
 

@@ -25,7 +25,7 @@ class IssueCode(StrEnum):
     GOAL_NOT_FOUND = "goal_not_found"  # not one of this trainee's goals
     GOAL_CLOSED = "goal_closed"  # dropped: it takes no more progress
     NO_CHANGE = "no_change"  # the proposed progress is the current progress
-    SENSITIVE_NOTE = "sensitive_note"  # a note about health or a diagnosis: never stored as memory
+    SENSITIVE_TEXT = "sensitive_text"  # health or a diagnosis: never stored as a note or a progress reason
 
 
 @dataclass(frozen=True)
