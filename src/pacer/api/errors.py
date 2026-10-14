@@ -13,12 +13,16 @@ errors, and this module decides how each one looks to an HTTP client:
 Every error body has the same shape as FastAPI's own: {"detail": ...}.
 """
 
+import logging
+
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
 from pacer.domain import DomainRuleError
 from pacer.services import NotFoundError, PermissionDeniedError, RuleViolationError
+
+log = logging.getLogger(__name__)
 
 
 class NotAuthenticatedError(Exception):
@@ -43,7 +47,11 @@ def status_for(exc: Exception) -> int:
 
 
 async def _error_response(request: Request, exc: Exception) -> JSONResponse:
-    return JSONResponse(status_code=status_for(exc), content={"detail": str(exc)})
+    code = status_for(exc)
+    # 401/403 are worth noticing (someone tried something they may not do); the rest are routine.
+    level = logging.WARNING if code in (401, 403) else logging.INFO
+    log.log(level, "%s %s -> %s %s: %s", request.method, request.url.path, code, type(exc).__name__, exc)
+    return JSONResponse(status_code=code, content={"detail": str(exc)})
 
 
 async def _validation_error_response(request: Request, exc: ValidationError) -> JSONResponse:

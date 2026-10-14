@@ -1,5 +1,6 @@
 """Database connection: one engine per process, and a unit-of-work helper."""
 
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from functools import lru_cache
@@ -18,7 +19,18 @@ def get_engine() -> Engine:
     time zone. Pinning it to UTC means every time leaves the database in UTC, whatever
     the server's local zone is (the same instant either way, but one consistent form).
     """
-    return create_engine(get_settings().database_url, connect_args={"options": "-c timezone=UTC"})
+    settings = get_settings()
+    return create_engine(
+        settings.database_url,
+        connect_args={"options": "-c timezone=UTC"},
+        echo=settings.sql_echo,  # SQL_ECHO=true: log every statement SQLAlchemy sends
+        json_serializer=_json_dumps,
+    )
+
+
+def _json_dumps(value: object) -> str:
+    """JSON columns keep Hebrew as Hebrew. The default (ensure_ascii) stores it as \\u05d0... escapes."""
+    return json.dumps(value, ensure_ascii=False)
 
 
 @contextmanager

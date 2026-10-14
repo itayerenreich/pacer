@@ -8,6 +8,8 @@ Run it:
 
 from fastapi import FastAPI
 
+from pacer.logging_config import configure_logging
+
 from .errors import register_error_handlers
 from .routers import approvals, goals, me, trainees
 
@@ -21,6 +23,7 @@ Staff API for a pre-military academy: trainees, goals and progress, and approval
 
 def create_app() -> FastAPI:
     """Build the app. A function, so tests can build a fresh app with their own overrides."""
+    configure_logging()
     app = FastAPI(title="Pacer API", version="0.1.0", description=DESCRIPTION)
     register_error_handlers(app)
     for module in (me, trainees, goals, approvals):
