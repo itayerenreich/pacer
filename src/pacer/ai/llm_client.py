@@ -16,7 +16,7 @@ Rules this module enforces for EVERY call:
 import logging
 import os
 import time
-from typing import Protocol
+from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, SecretStr
 
@@ -58,7 +58,17 @@ class LLMClient(Protocol):
     model: str
     runs_locally: bool  # True: the data never leaves this computer (the router relies on this)
 
-    def complete(self, prompt: Prompt, user_message: str, *, max_tokens: int = 1024) -> LLMResponse: ...
+    def complete(
+        self,
+        prompt: Prompt,
+        user_message: str,
+        *,
+        max_tokens: int = 1024,
+        response_schema: dict[str, Any] | None = None,
+    ) -> LLMResponse:
+        """response_schema: a JSON Schema the answer should follow (see structured.py).
+        A hint to the provider; the caller still validates the answer."""
+        ...
 
 
 # --- errors -------------------------------------------------------------------------------
@@ -134,13 +144,20 @@ class LiteLLMClient:
         self._timeout_s = timeout_s
         self._retries = retries
 
-    def complete(self, prompt: Prompt, user_message: str, *, max_tokens: int = 1024) -> LLMResponse:
+    def complete(
+        self,
+        prompt: Prompt,
+        user_message: str,
+        *,
+        max_tokens: int = 1024,
+        response_schema: dict[str, Any] | None = None,
+    ) -> LLMResponse:
         if not user_message.strip():
             raise ValueError("user_message is empty")
 
         started = time.perf_counter()
         try:
-            raw = litellm.completion(**self._request(prompt, user_message, max_tokens))
+            raw = litellm.completion(**self._request(prompt, user_message, max_tokens, response_schema))
         except Exception as error:  # every provider failure leaves as one of OUR errors
             translated = _translate(error)
             log.warning(
@@ -164,7 +181,9 @@ class LiteLLMClient:
         )
         return response
 
-    def _request(self, prompt: Prompt, user_message: str, max_tokens: int) -> dict:
+    def _request(
+        self, prompt: Prompt, user_message: str, max_tokens: int, response_schema: dict[str, Any] | None
+    ) -> dict:
         request = {
             "model": self.model,
             "messages": [
@@ -177,6 +196,13 @@ class LiteLLMClient:
         }
         if self._temperature is not None:
             request["temperature"] = self._temperature
+        if response_schema is not None and litellm.supports_response_schema(model=self.model):
+            # The provider constrains the answer to this shape. For Anthropic, litellm also removes
+            # the keywords Claude rejects (minLength, maximum...) and keeps them as descriptions.
+            request["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "response", "schema": response_schema, "strict": True},
+            }
         if self._api_key is not None:
             request["api_key"] = self._api_key.get_secret_value()  # passed per call, never put in os.environ
         if self._api_base is not None:

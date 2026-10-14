@@ -6,6 +6,9 @@ May import from: domain, services (pipelines build on them). Must not be importe
     llm_client.py  the LLMClient interface, LiteLLMClient, LLMResponse, LLM errors
     pricing.py     our explicit price table (cost per call; unknown is None, never 0)
     clients.py     building a Claude client (cloud) or an Ollama client (this computer)
+    routing.py     which model serves which AI task, and the privacy rule (PERSONAL data stays local)
+    structured.py  complete_structured(): JSON that matches a Pydantic model, validated, one correction
+    checks.py      the small schema and text used by the connection checks
     check.py       python -m pacer.ai.check: a harmless connection check
 """
 

@@ -7,6 +7,7 @@ and that no personal data reached a model that is not local.
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from pacer.ai import LLMResponse, Prompt
 
@@ -16,6 +17,7 @@ class Call:
     prompt: Prompt
     user_message: str
     max_tokens: int
+    response_schema: dict[str, Any] | None = None
 
 
 @dataclass
@@ -27,10 +29,19 @@ class FakeLLMClient:
     runs_locally: bool = True
     calls: list[Call] = field(default_factory=list)
 
-    def complete(self, prompt: Prompt, user_message: str, *, max_tokens: int = 1024) -> LLMResponse:
+    truncated: bool = False  # set True to simulate an answer cut off at max_tokens
+
+    def complete(
+        self,
+        prompt: Prompt,
+        user_message: str,
+        *,
+        max_tokens: int = 1024,
+        response_schema: dict[str, Any] | None = None,
+    ) -> LLMResponse:
         if not isinstance(prompt, Prompt):  # same contract as the real client: a versioned prompt
             raise TypeError("complete() needs a Prompt loaded from a prompt file")
-        self.calls.append(Call(prompt, user_message, max_tokens))
+        self.calls.append(Call(prompt, user_message, max_tokens, response_schema))
         if callable(self.answers):
             text = self.answers(user_message)
         else:
@@ -43,5 +54,5 @@ class FakeLLMClient:
             output_tokens=len(text.split()),
             cost_usd=0.0,
             latency_ms=0,
-            truncated=False,
+            truncated=self.truncated,
         )
