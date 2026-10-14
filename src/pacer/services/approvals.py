@@ -5,11 +5,15 @@ The state machine itself (PENDING -> APPROVED / REJECTED) lives in the domain
 who is asking, whether they may ask, and what happens when a request is approved.
 """
 
+import logging
+
 from pacer.domain import ApprovalKind, ApprovalRequest, ApprovalStatus, StaffMember, TraineeStatus
 from pacer.repositories.interfaces import ApprovalRequestRepo, GroupRepo, TraineeRepo
 
 from .errors import RuleViolationError, found
 from .permissions import is_manager, leads_group, require
+
+log = logging.getLogger(__name__)
 
 
 class ApprovalService:
@@ -42,7 +46,7 @@ class ApprovalService:
         if kind == ApprovalKind.STATUS_CHANGE and requested_status == trainee.status:
             raise RuleViolationError(f"Trainee {trainee_id} is already {trainee.status}")
 
-        return self._approvals.add(
+        request = self._approvals.add(
             ApprovalRequest(
                 kind=kind,
                 trainee_id=trainee_id,
@@ -51,6 +55,10 @@ class ApprovalService:
                 requested_status=requested_status,
             )
         )
+        log.info(
+            "Approval request %s (%s) for trainee %s by staff %s", request.id, kind, trainee_id, actor.id
+        )
+        return request
 
     def approve(self, actor: StaffMember, request_id: int, note: str | None = None) -> ApprovalRequest:
         """Approve, and carry out what was approved, in the same unit of work.
@@ -63,16 +71,26 @@ class ApprovalService:
         request = found(self._approvals.get(request_id), "Approval request", request_id)
         approved = request.approve(actor.id, note)  # InvalidTransitionError unless PENDING
         self._approvals.update(approved)
+        log.info("Approval request %s (%s) approved by staff %s", request_id, approved.kind, actor.id)
 
         if approved.kind == ApprovalKind.STATUS_CHANGE:
             trainee = found(self._trainees.get(approved.trainee_id), "Trainee", approved.trainee_id)
             self._trainees.update(trainee.with_status(approved.requested_status))
+            log.info(
+                "Trainee %s: status %s -> %s (request %s)",
+                trainee.id,
+                trainee.status,
+                approved.requested_status,
+                request_id,
+            )
         return approved
 
     def reject(self, actor: StaffMember, request_id: int, note: str | None = None) -> ApprovalRequest:
         require(is_manager(actor), "reject requests")
         request = found(self._approvals.get(request_id), "Approval request", request_id)
-        return self._approvals.update(request.reject(actor.id, note))
+        rejected = self._approvals.update(request.reject(actor.id, note))
+        log.info("Approval request %s (%s) rejected by staff %s", request_id, rejected.kind, actor.id)
+        return rejected
 
     def list_pending(self, actor: StaffMember) -> list[ApprovalRequest]:
         """The manager sees every pending request; a counselor sees only their own."""

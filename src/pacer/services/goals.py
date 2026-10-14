@@ -1,10 +1,14 @@
 """Goals and progress: adding goals, updating progress, reading the history."""
 
+import logging
+
 from pacer.domain import Goal, GoalUpdate, StaffMember, Trainee
 from pacer.repositories.interfaces import GoalRepo, GoalUpdateRepo, GroupRepo, TraineeRepo
 
 from .errors import RuleViolationError, found
 from .permissions import can_edit_goals, can_view_trainee, require
+
+log = logging.getLogger(__name__)
 
 
 class GoalService:
@@ -26,7 +30,9 @@ class GoalService:
     def add_goal(self, actor: StaffMember, goal: Goal) -> Goal:
         trainee = self._open_trainee(goal.trainee_id)
         require(can_edit_goals(actor, trainee), "add goals for this trainee")
-        return self._goals.add(goal)
+        added = self._goals.add(goal)
+        log.info("Goal %s added for trainee %s by staff %s", added.id, trainee.id, actor.id)
+        return added
 
     def update_progress(self, actor: StaffMember, goal_id: int, progress: int, note: str) -> Goal:
         """Move a goal to a new progress value, and record who, when, and why.
@@ -42,6 +48,14 @@ class GoalService:
         updated = goal.with_progress(progress)  # a new object; raises if the goal was dropped
         self._goals.update(updated)
         self._updates.add(GoalUpdate(goal_id=goal_id, author_id=actor.id, progress=progress, note=note))
+        log.info(
+            "Goal %s: progress %s -> %s (%s) by staff %s",
+            goal_id,
+            goal.progress,
+            progress,
+            updated.status,
+            actor.id,
+        )
         return updated
 
     def list_goals(self, actor: StaffMember, trainee_id: int) -> list[Goal]:

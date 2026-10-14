@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     postgres_db: str
     postgres_host: str = "localhost"
     postgres_port: int = 5432
+    sql_echo: bool = False  # SQL_ECHO=true in .env prints every SQL statement (debugging)
 
     @property
     def database_url(self) -> str:
@@ -27,3 +28,12 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+class LoggingSettings(BaseSettings):
+    """Separate from Settings on purpose: logging must work even where there is no
+    database configuration (CI, the fast tests), so nothing here is required."""
+
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    log_level: str = "INFO"  # LOG_LEVEL=DEBUG in .env shows everything
