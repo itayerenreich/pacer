@@ -1,0 +1,32 @@
+{
+    // Run configurations for the VS Code debugger (Run and Debug panel, or F5).
+    // Each one runs under the debugger, so breakpoints (F9) stop the program there.
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "API server (debug)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "uvicorn",
+            "args": ["pacer.api.app:app", "--port", "8000"],
+            "envFile": "${workspaceFolder}/.env",
+            "justMyCode": true
+        },
+        {
+            "name": "Demo data (--reset)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pacer.demo",
+            "args": ["--reset"],
+            "envFile": "${workspaceFolder}/.env"
+        },
+        {
+            "name": "pytest: current file",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "pytest",
+            "args": ["${file}", "-q"],
+            "justMyCode": true
+        }
+    ]
+}
