@@ -71,6 +71,8 @@ class ApprovalRequest(BaseModel):
         return self._decide(ApprovalStatus.REJECTED, manager_id, note)
 
     def _decide(self, new_status: ApprovalStatus, manager_id: int, note: str | None) -> Self:
+        if not TRANSITIONS[self.status]:
+            raise InvalidTransitionError(f"This request is already {self.status}")
         if new_status not in TRANSITIONS[self.status]:
             raise InvalidTransitionError(
                 f"Cannot move an approval request from {self.status} to {new_status}"
