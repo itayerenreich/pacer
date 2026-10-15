@@ -161,3 +161,48 @@ class TaskRow(Base):
     source_meeting_id: Mapped[int | None] = mapped_column(ForeignKey("staff_meetings.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PersonalTalkRow(Base):
+    __tablename__ = "personal_talks"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    trainee_id: Mapped[int] = mapped_column(ForeignKey("trainees.id"), index=True)
+    counselor_id: Mapped[int] = mapped_column(ForeignKey("staff_members.id"))
+    held_on: Mapped[date]
+    status: Mapped[str] = mapped_column(String(20))
+    notes: Mapped[str] = mapped_column(Text)
+    anonymized_notes: Mapped[str | None] = mapped_column(Text)
+    summary: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class TraineeNoteRow(Base):
+    __tablename__ = "trainee_notes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    trainee_id: Mapped[int] = mapped_column(ForeignKey("trainees.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    text: Mapped[str] = mapped_column(String(300))
+    author_id: Mapped[int] = mapped_column(ForeignKey("staff_members.id"))
+    # SET NULL: deleting a talk keeps the notes a counselor approved from it
+    source_talk_id: Mapped[int | None] = mapped_column(ForeignKey("personal_talks.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class TalkProposalRow(Base):
+    __tablename__ = "talk_proposals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    talk_id: Mapped[int] = mapped_column(ForeignKey("personal_talks.id"), index=True)
+    kind: Mapped[str] = mapped_column(String(20))
+    goal_id: Mapped[int | None] = mapped_column(ForeignKey("goals.id"))
+    progress: Mapped[int | None]
+    note_kind: Mapped[str | None] = mapped_column(String(20))
+    text: Mapped[str | None] = mapped_column(String(500))  # None once decided (data minimization)
+    status: Mapped[str] = mapped_column(String(20))
+    decided_by_id: Mapped[int | None] = mapped_column(ForeignKey("staff_members.id"))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    goal_update_id: Mapped[int | None] = mapped_column(ForeignKey("goal_updates.id"))
+    note_id: Mapped[int | None] = mapped_column(ForeignKey("trainee_notes.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

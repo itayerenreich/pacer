@@ -79,7 +79,7 @@ def send(sample: SampleMeeting) -> str:
         due = p.due_date.isoformat() if p.due_date else "no date"
         lines.append(f"- [{p.id}] {p.description}  |  {owner}  |  {due}")
     lines += ["", "## Validation issues", ""]
-    lines += [f"- task {i.task or '-'}: {i.code}: {i.detail}" for i in result.issues] or ["- none"]
+    lines += [f"- item {i.item or '-'}: {i.code}: {i.detail}" for i in result.issues] or ["- none"]
     cost = "unknown" if result.cost_usd is None else f"${result.cost_usd:.5f}"
     lines += ["", f"Prompt {result.prompt_ref}, attempts {result.attempts}, cost {cost}."]
     lines += [f"Approve or reject at http://127.0.0.1:8000/docs with X-Staff-Id: {MANAGER_ID}."]

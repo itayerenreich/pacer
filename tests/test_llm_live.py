@@ -127,3 +127,39 @@ def test_claude_does_not_give_a_task_to_someone_who_was_not_there():
     assert "[STAFF_4]" not in owners, owners
     assert any(p.owner_id == 3 for p in result.proposals)  # עומר: check which זיו
     assert all("[STAFF_" not in p.description for p in result.proposals)
+
+
+# --- the personal talk pipeline, with Claude (task 7) ------------------------------------------------
+
+
+def test_claude_summarizes_the_sample_talk_safely():
+    from fakes import FakeUnitOfWork, empty_repos
+
+    from pacer.ai.anonymization import Anonymizer, load_roster
+    from pacer.ai.routing import MODELS, ModelSpec, Router
+    from pacer.ai.talk_pipeline import TalkPipeline, is_sensitive, talk_service
+    from pacer.demo import build_academy
+    from pacer.demo.talks import MAYA
+    from pacer.domain import TalkProposalKind
+
+    repos = empty_repos()
+    build_academy(repos)
+    spy = _Spy(claude_client("claude-haiku-5-5"))
+    router = Router(models={**MODELS, "claude-haiku": ModelSpec(runs_locally=False, make_client=lambda: spy)})
+    itai = repos.staff.get(MAYA.counselor_id)
+    uow = FakeUnitOfWork(repos)
+    with uow() as r:
+        talk = talk_service(r).record_talk(itai, MAYA.trainee_id, held_on=MAYA.held_on, notes=MAYA.notes)
+    result = TalkPipeline(uow, router).summarize(itai, talk.id)
+
+    assert not Anonymizer(load_roster(repos.staff, repos.trainees)).contains_known_name(spy.sent[0])
+    progress = [p for p in result.proposals if p.kind is TalkProposalKind.PROGRESS]
+    notes = [p for p in result.proposals if p.kind is TalkProposalKind.NOTE]
+    assert 63 in {p.goal_id for p in progress}  # running: 2 -> 3 km, out of 5
+    assert all(p.progress > 25 for p in progress if p.goal_id == 63)
+    assert 1 <= len(notes) <= 5
+    assert not any(is_sensitive(n.text) for n in notes)  # headaches and the doctor stay out of memory
+    raw = spy.received[-1]
+    assert "כאבי ראש" not in raw[raw.find('"notes"') :]  # and Claude did not even propose them
+    assert HEBREW.search(result.talk.summary)
+    assert result.cost_usd is not None and result.cost_usd < 0.01

@@ -30,13 +30,17 @@ from .interfaces import (
     GroupRepo,
     MeetingRepo,
     PersonalFileRepo,
+    PersonalTalkRepo,
     ProposedTaskRepo,
     StaffRepo,
+    TalkProposalRepo,
     TaskRepo,
+    TraineeNoteRepo,
     TraineeRepo,
 )
 from .meeting import MeetingRepository, ProposedTaskRepository, TaskRepository
 from .staff import StaffRepository
+from .talk import PersonalTalkRepository, TalkProposalRepository, TraineeNoteRepository
 from .trainee import PersonalFileRepository, TraineeRepository
 
 
@@ -55,6 +59,9 @@ class Repos:
     meetings: MeetingRepo
     proposals: ProposedTaskRepo
     tasks: TaskRepo
+    talks: PersonalTalkRepo
+    talk_proposals: TalkProposalRepo
+    notes: TraineeNoteRepo
 
     @classmethod
     def over(cls, session: Session) -> "Repos":
@@ -70,6 +77,9 @@ class Repos:
             meetings=MeetingRepository(session),
             proposals=ProposedTaskRepository(session),
             tasks=TaskRepository(session),
+            talks=PersonalTalkRepository(session),
+            talk_proposals=TalkProposalRepository(session),
+            notes=TraineeNoteRepository(session),
         )
 
 

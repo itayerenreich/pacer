@@ -11,9 +11,12 @@ from .enums import (
     GoalCategory,
     GoalStatus,
     MeetingStatus,
+    NoteKind,
     ProposalStatus,
     ResponsibilityArea,
     StaffRole,
+    TalkProposalKind,
+    TalkStatus,
     TaskStatus,
     TraineeStatus,
 )
@@ -21,6 +24,7 @@ from .errors import DomainRuleError, InvalidTransitionError
 from .goal import Goal, GoalUpdate
 from .meeting import ProposedTask, StaffMeeting, Task
 from .staff import StaffMember
+from .talk import PersonalTalk, TalkProposal, TraineeNote
 from .trainee import PersonalFile, Trainee
 
 __all__ = [
@@ -36,15 +40,21 @@ __all__ = [
     "Group",
     "InvalidTransitionError",
     "MeetingStatus",
+    "NoteKind",
     "ProposalStatus",
     "ProposedTask",
     "PersonalFile",
+    "PersonalTalk",
     "ResponsibilityArea",
     "StaffMeeting",
     "StaffMember",
     "StaffRole",
+    "TalkProposal",
+    "TalkProposalKind",
+    "TalkStatus",
     "Task",
     "TaskStatus",
     "Trainee",
+    "TraineeNote",
     "TraineeStatus",
 ]

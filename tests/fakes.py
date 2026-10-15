@@ -23,13 +23,16 @@ from pacer.domain import (
     GoalUpdate,
     Group,
     PersonalFile,
+    PersonalTalk,
     ProposalStatus,
     ProposedTask,
     StaffMeeting,
     StaffMember,
     StaffRole,
+    TalkProposal,
     Task,
     Trainee,
+    TraineeNote,
 )
 from pacer.repositories import Repos
 
@@ -148,6 +151,40 @@ class FakeTaskRepo(_Store[Task]):
         return self.where()
 
 
+class FakeTalkRepo(_Store[PersonalTalk]):
+    def lock(self, talk_id: int) -> PersonalTalk | None:
+        return self.get(talk_id)
+
+    def list_by_trainee(self, trainee_id: int) -> list[PersonalTalk]:
+        return sorted(self.where(trainee_id=trainee_id), key=lambda t: (t.held_on, t.id), reverse=True)
+
+
+class FakeTalkProposalRepo(_Store[TalkProposal]):
+    def lock(self, proposal_id: int) -> TalkProposal | None:
+        return self.get(proposal_id)
+
+    def list_by_talk(self, talk_id: int) -> list[TalkProposal]:
+        return self.where(talk_id=talk_id)
+
+    def count_open(self, talk_id: int) -> int:
+        return len(self.where(talk_id=talk_id, status=ProposalStatus.PROPOSED))
+
+
+class FakeTraineeNoteRepo(_Store[TraineeNote]):
+    def __init__(self, proposals: FakeTalkProposalRepo | None = None) -> None:
+        super().__init__()
+        self._proposals = proposals  # to do what ON DELETE SET NULL does in the database
+
+    def delete(self, note_id: int) -> None:
+        self.rows.pop(note_id, None)
+        if self._proposals is not None:
+            for proposal in self._proposals.where(note_id=note_id):
+                self._proposals.rows[proposal.id] = proposal.model_copy(update={"note_id": None})
+
+    def list_by_trainee(self, trainee_id: int) -> list[TraineeNote]:
+        return sorted(self.where(trainee_id=trainee_id), key=lambda n: (n.created_at, n.id))
+
+
 class FakeUnitOfWork:
     """A fake of repositories(engine): each call opens a "transaction" over the same fakes.
 
@@ -179,6 +216,7 @@ class FakeUnitOfWork:
 
 def empty_repos() -> Repos:
     """A fresh, empty fake for every repository."""
+    talk_proposals = FakeTalkProposalRepo()
     return Repos(
         staff=FakeStaffRepo(),
         cohorts=FakeCohortRepo(),
@@ -191,6 +229,9 @@ def empty_repos() -> Repos:
         meetings=FakeMeetingRepo(),
         proposals=FakeProposedTaskRepo(),
         tasks=FakeTaskRepo(),
+        talks=FakeTalkRepo(),
+        talk_proposals=talk_proposals,
+        notes=FakeTraineeNoteRepo(talk_proposals),
     )
 
 
@@ -213,11 +254,15 @@ class World:
     meetings: FakeMeetingRepo = field(default_factory=FakeMeetingRepo)
     proposals: FakeProposedTaskRepo = field(default_factory=FakeProposedTaskRepo)
     tasks: FakeTaskRepo = field(default_factory=FakeTaskRepo)
+    talks: FakeTalkRepo = field(default_factory=FakeTalkRepo)
+    talk_proposals: FakeTalkProposalRepo = field(default_factory=FakeTalkProposalRepo)
+    notes: FakeTraineeNoteRepo = field(default_factory=FakeTraineeNoteRepo)
     @property
     def repos(self) -> Repos:
         return Repos(**{name: getattr(self, name) for name in Repos.__dataclass_fields__})
 
     def __post_init__(self) -> None:
+        self.notes = FakeTraineeNoteRepo(self.talk_proposals)
         self.uow = FakeUnitOfWork(self.repos)
         self.manager = self.staff.add(StaffMember(full_name="Ronit Manager", role=StaffRole.MANAGER))
         self.noa = self.staff.add(StaffMember(full_name="Noa Levi", role=StaffRole.COUNSELOR))
