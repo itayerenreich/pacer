@@ -22,7 +22,7 @@ from pacer.domain import (
     StaffMember,
     Task,
 )
-from pacer.domain.meeting import PROPOSAL_TRANSITIONS
+from pacer.domain.meeting import DESCRIPTION_MAX_LENGTH, PROPOSAL_TRANSITIONS
 from pacer.domain.state import require_transition
 from pacer.repositories.interfaces import MeetingRepo, ProposedTaskRepo, StaffRepo, TaskRepo
 
@@ -35,7 +35,7 @@ log = logging.getLogger(__name__)
 class TaskDraft(BaseModel):
     """One task as the pipeline proposes it, before it is stored as a ProposedTask."""
 
-    description: str = Field(min_length=5, max_length=300)
+    description: str = Field(min_length=5, max_length=DESCRIPTION_MAX_LENGTH)
     owner_id: int | None = None
     due_date: date | None = None
 
@@ -45,7 +45,7 @@ class ProposalEdits(BaseModel):
 
     model_config = ConfigDict(extra="forbid")  # not status, not task_id: only these three
 
-    description: str | None = Field(default=None, min_length=5, max_length=300)
+    description: str | None = Field(default=None, min_length=5, max_length=DESCRIPTION_MAX_LENGTH)
     owner_id: int | None = None
     due_date: date | None = None
 
@@ -123,13 +123,9 @@ class MeetingService:
     ) -> Task:
         """Apply the manager's edits, check the result, create the real Task, record the decision."""
         require(is_manager(actor), "approve proposed tasks")
-        proposal = found(self._proposals.get(proposal_id), "Proposed task", proposal_id)
-        # Check the decision is still open BEFORE creating anything (a second approve must not
-        # leave a second Task behind, even outside a database transaction).
-        require_transition(PROPOSAL_TRANSITIONS, proposal.status, ProposalStatus.APPROVED, "proposal")
+        proposal, meeting = self._decidable(proposal_id)
         if edits is not None:
             proposal = proposal.edited(**edits.model_dump(exclude_unset=True))
-        meeting = found(self._meetings.get(proposal.meeting_id), "Meeting", proposal.meeting_id)
 
         if proposal.owner_id is None:
             raise RuleViolationError(
@@ -161,11 +157,27 @@ class MeetingService:
 
     def reject_proposal(self, actor: StaffMember, proposal_id: int) -> ProposedTask:
         require(is_manager(actor), "reject proposed tasks")
-        proposal = found(self._proposals.get(proposal_id), "Proposed task", proposal_id)
+        proposal, _ = self._decidable(proposal_id)
         rejected = self._proposals.update(proposal.reject(actor.id))
         log.info("Proposal %s rejected by staff %s", proposal_id, actor.id)
         self._close_if_done(proposal.meeting_id)
         return rejected
+
+    def _decidable(self, proposal_id: int) -> tuple[ProposedTask, StaffMeeting]:
+        """The proposal, still open, with its meeting LOCKED for the rest of this transaction.
+
+        Every decision on a meeting's proposals locks the meeting first (then the proposal), so
+        decisions on the same meeting run one after the other: a double click cannot create a
+        second Task, and when the last two proposals are decided at the same moment, the second
+        one sees that nothing is left open and closes the meeting. One order of locks everywhere
+        (meeting, then proposal) means two requests can never wait for each other forever.
+        """
+        proposal = found(self._proposals.get(proposal_id), "Proposed task", proposal_id)
+        meeting = found(self._meetings.lock(proposal.meeting_id), "Meeting", proposal.meeting_id)
+        proposal = self._proposals.lock(proposal_id)  # re-read now that no one else can decide
+        # Still open? Checked BEFORE anything is created.
+        require_transition(PROPOSAL_TRANSITIONS, proposal.status, ProposalStatus.APPROVED, "proposal")
+        return proposal, meeting
 
     def _close_if_done(self, meeting_id: int) -> None:
         meeting = self._meetings.get(meeting_id)

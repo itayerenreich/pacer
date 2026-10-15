@@ -13,3 +13,6 @@ wheels/
 # Secrets
 .env
 
+
+# Local data: meeting recordings waiting for transcription (personal data, never in Git)
+data/

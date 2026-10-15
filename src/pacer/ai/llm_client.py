@@ -57,6 +57,7 @@ class LLMClient(Protocol):
 
     model: str
     runs_locally: bool  # True: the data never leaves this computer (the router relies on this)
+    native_schema: bool  # True: the provider itself constrains the answer to a JSON Schema
 
     def complete(
         self,
@@ -138,6 +139,8 @@ class LiteLLMClient:
     ) -> None:
         self.model = model
         self.runs_locally = runs_locally
+        # Known once, from litellm's bundled model table (no network): Claude yes, llama3.2 no.
+        self.native_schema = bool(litellm.supports_response_schema(model=model))
         self._api_key = api_key
         self._api_base = api_base
         self._temperature = temperature
@@ -196,7 +199,7 @@ class LiteLLMClient:
         }
         if self._temperature is not None:
             request["temperature"] = self._temperature
-        if response_schema is not None and litellm.supports_response_schema(model=self.model):
+        if response_schema is not None and self.native_schema:
             # The provider constrains the answer to this shape. For Anthropic, litellm also removes
             # the keywords Claude rejects (minLength, maximum...) and keeps them as descriptions.
             request["response_format"] = {

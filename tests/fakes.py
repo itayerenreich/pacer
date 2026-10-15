@@ -6,6 +6,9 @@ stored as copies, like a database would: changing an object you got back does no
 change what is stored.
 """
 
+import copy
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -28,6 +31,7 @@ from pacer.domain import (
     Task,
     Trainee,
 )
+from pacer.repositories import Repos
 
 
 class _Store[M: BaseModel]:
@@ -118,11 +122,17 @@ class FakeApprovalRequestRepo(_Store[ApprovalRequest]):
 
 
 class FakeMeetingRepo(_Store[StaffMeeting]):
+    def lock(self, meeting_id: int) -> StaffMeeting | None:
+        return self.get(meeting_id)  # one thread, no other transactions: nothing to wait for
+
     def list_all(self) -> list[StaffMeeting]:
         return sorted(self.where(), key=lambda m: m.held_on, reverse=True)
 
 
 class FakeProposedTaskRepo(_Store[ProposedTask]):
+    def lock(self, proposal_id: int) -> ProposedTask | None:
+        return self.get(proposal_id)
+
     def list_by_meeting(self, meeting_id: int) -> list[ProposedTask]:
         return self.where(meeting_id=meeting_id)
 
@@ -136,6 +146,52 @@ class FakeTaskRepo(_Store[Task]):
 
     def list_all(self) -> list[Task]:
         return self.where()
+
+
+class FakeUnitOfWork:
+    """A fake of repositories(engine): each call opens a "transaction" over the same fakes.
+
+    All or nothing, like the real one: if the block raises, every store goes back to how it was
+    when the block started. It also counts open transactions, so a test can check that a model
+    is never called while one is open.
+    """
+
+    def __init__(self, repos: Repos) -> None:
+        self.repos = repos
+        self.open = 0
+        self.opened = 0
+
+    @contextmanager
+    def __call__(self) -> Iterator[Repos]:
+        stores = [getattr(self.repos, name) for name in Repos.__dataclass_fields__]
+        snapshot = [copy.deepcopy(store.rows) for store in stores]
+        self.open += 1
+        self.opened += 1
+        try:
+            yield self.repos
+        except BaseException:
+            for store, rows in zip(stores, snapshot, strict=True):
+                store.rows = rows
+            raise
+        finally:
+            self.open -= 1
+
+
+def empty_repos() -> Repos:
+    """A fresh, empty fake for every repository."""
+    return Repos(
+        staff=FakeStaffRepo(),
+        cohorts=FakeCohortRepo(),
+        groups=FakeGroupRepo(),
+        trainees=FakeTraineeRepo(),
+        personal_files=FakePersonalFileRepo(),
+        goals=FakeGoalRepo(),
+        goal_updates=FakeGoalUpdateRepo(),
+        approvals=FakeApprovalRequestRepo(),
+        meetings=FakeMeetingRepo(),
+        proposals=FakeProposedTaskRepo(),
+        tasks=FakeTaskRepo(),
+    )
 
 
 @dataclass
@@ -157,8 +213,12 @@ class World:
     meetings: FakeMeetingRepo = field(default_factory=FakeMeetingRepo)
     proposals: FakeProposedTaskRepo = field(default_factory=FakeProposedTaskRepo)
     tasks: FakeTaskRepo = field(default_factory=FakeTaskRepo)
+    @property
+    def repos(self) -> Repos:
+        return Repos(**{name: getattr(self, name) for name in Repos.__dataclass_fields__})
 
     def __post_init__(self) -> None:
+        self.uow = FakeUnitOfWork(self.repos)
         self.manager = self.staff.add(StaffMember(full_name="Ronit Manager", role=StaffRole.MANAGER))
         self.noa = self.staff.add(StaffMember(full_name="Noa Levi", role=StaffRole.COUNSELOR))
         self.omer = self.staff.add(StaffMember(full_name="Omer Cohen", role=StaffRole.COUNSELOR))

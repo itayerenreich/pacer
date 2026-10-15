@@ -43,12 +43,20 @@ def test_valid_json_becomes_a_validated_object():
     assert result.prompt_ref == "structured_check@v1"
 
 
-def test_the_schema_goes_to_the_provider_and_into_the_message():
+def test_without_native_support_the_schema_goes_into_the_message():
     _, fake = run(GOOD_JSON)
     [call] = fake.calls
     assert call.response_schema == TextDigest.model_json_schema()
     assert call.user_message.startswith(SAMPLE_TEXT)  # the real input first
-    assert '"topics"' in call.user_message  # then the schema, for models without native support
+    assert '"topics"' in call.user_message  # then the schema, which the model must read
+
+
+def test_with_native_support_the_schema_is_sent_once_not_twice():
+    _, fake = run(GOOD_JSON, native_schema=True)
+    [call] = fake.calls
+    assert call.response_schema == TextDigest.model_json_schema()  # the provider enforces it
+    assert '"topics"' not in call.user_message  # so the message does not repeat it
+    assert call.user_message.startswith(SAMPLE_TEXT)
 
 
 @pytest.mark.parametrize(
@@ -181,7 +189,9 @@ def test_claude_gets_the_schema_as_a_native_response_format(sent):
     result = complete_structured(client, PROMPT, SAMPLE_TEXT, TextDigest)
 
     assert result.value.language == "he"
+    assert client.native_schema
     assert sent[0]["response_format"]["json_schema"]["schema"] == TextDigest.model_json_schema()
+    assert '"topics"' not in sent[0]["messages"][1]["content"]  # once, not twice
 
 
 def test_a_model_without_native_support_gets_only_the_instructions(sent):
@@ -189,4 +199,6 @@ def test_a_model_without_native_support_gets_only_the_instructions(sent):
     result = complete_structured(client, PROMPT, SAMPLE_TEXT, TextDigest)
 
     assert result.value.language == "he"
+    assert not client.native_schema
     assert "response_format" not in sent[0]
+    assert '"topics"' in sent[0]["messages"][1]["content"]

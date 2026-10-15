@@ -13,15 +13,25 @@ FastAPI builds this chain for each request, from the bottom up:
   "200 OK", and a failed commit would be invisible to the client.
 * Tests swap any link in the chain with app.dependency_overrides, e.g. a test
   database engine, or in-memory fake repositories with no database at all.
+
+Endpoints that wait for a model (the AI pipelines) are different: they must NOT hold a
+transaction open while the model works. They never touch SessionDep. They get a unit-of-work
+FACTORY instead, and the pipeline opens short transactions of its own (read -> model -> write).
+Even the actor is read in its own short transaction (DetachedActor), closed before the endpoint runs.
 """
 
 from collections.abc import Iterator
+from functools import cache
 from typing import Annotated
 
 from fastapi import Depends, Header
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
+from pacer.ai.meeting_pipeline import MeetingPipeline
+from pacer.ai.routing import Router, get_router
+from pacer.ai.transcription import RecordingStore, Transcriber, WhisperTranscriber
+from pacer.config import get_ai_settings
 from pacer.domain import StaffMember
 from pacer.repositories import (
     ApprovalRequestRepository,
@@ -34,7 +44,9 @@ from pacer.repositories import (
     StaffRepository,
     TaskRepository,
     TraineeRepository,
+    UnitOfWork,
     get_engine,
+    repositories,
     unit_of_work,
 )
 from pacer.repositories.interfaces import (
@@ -116,11 +128,11 @@ def get_task_repository(session: SessionDep) -> TaskRepo:
 # --- who is asking ----------------------------------------------------------------------
 
 
+StaffIdHeader = Annotated[int | None, Header(description="Development only: the id of the acting staff member")]
+
+
 def get_current_actor(
-    staff: Annotated[StaffRepo, Depends(get_staff_repository)],
-    x_staff_id: Annotated[
-        int | None, Header(description="Development only: the id of the acting staff member")
-    ] = None,
+    staff: Annotated[StaffRepo, Depends(get_staff_repository)], x_staff_id: StaffIdHeader = None
 ) -> StaffMember:
     """The staff member making this request.
 
@@ -139,6 +151,24 @@ def get_current_actor(
 
 
 Actor = Annotated[StaffMember, Depends(get_current_actor)]
+
+
+def get_unit_of_work(engine: Annotated[Engine, Depends(get_db_engine)]) -> UnitOfWork:
+    """A factory of short transactions, for code that must open and close its own."""
+    return lambda: repositories(engine)
+
+
+UnitOfWorkDep = Annotated[UnitOfWork, Depends(get_unit_of_work)]
+
+
+def get_detached_actor(uow: UnitOfWorkDep, x_staff_id: StaffIdHeader = None) -> StaffMember:
+    """The same check as get_current_actor, in a transaction that is closed again before the
+    endpoint runs. For endpoints that wait for a model."""
+    with uow() as repos:
+        return get_current_actor(repos.staff, x_staff_id)
+
+
+DetachedActor = Annotated[StaffMember, Depends(get_detached_actor)]
 
 
 # --- services -------------------------------------------------------------------------
@@ -190,3 +220,38 @@ def get_task_service(tasks: Annotated[TaskRepo, Depends(get_task_repository)]) -
 
 MeetingServiceDep = Annotated[MeetingService, Depends(get_meeting_service)]
 TaskServiceDep = Annotated[TaskService, Depends(get_task_service)]
+
+
+# --- AI ---------------------------------------------------------------------------------------
+
+
+def get_ai_router() -> Router:
+    return get_router()
+
+
+@cache
+def _whisper() -> Transcriber | None:
+    """One transcriber per process: it holds the loaded model. None when faster-whisper is not installed."""
+    if not WhisperTranscriber.available():
+        return None
+    return WhisperTranscriber(get_ai_settings().whisper_model)
+
+
+def get_transcriber() -> Transcriber | None:
+    return _whisper()
+
+
+def get_recordings() -> RecordingStore:
+    return RecordingStore(get_ai_settings().recordings_dir)
+
+
+def get_meeting_pipeline(
+    uow: UnitOfWorkDep,
+    router: Annotated[Router, Depends(get_ai_router)],
+    transcriber: Annotated[Transcriber | None, Depends(get_transcriber)],
+    recordings: Annotated[RecordingStore, Depends(get_recordings)],
+) -> MeetingPipeline:
+    return MeetingPipeline(uow, router, transcriber=transcriber, recordings=recordings)
+
+
+MeetingPipelineDep = Annotated[MeetingPipeline, Depends(get_meeting_pipeline)]

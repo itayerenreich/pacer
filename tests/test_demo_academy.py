@@ -8,18 +8,9 @@ services enforce are checked here on the generated data too.
 from datetime import UTC, datetime
 
 import pytest
-from fakes import (
-    FakeApprovalRequestRepo,
-    FakeCohortRepo,
-    FakeGoalRepo,
-    FakeGoalUpdateRepo,
-    FakeGroupRepo,
-    FakePersonalFileRepo,
-    FakeStaffRepo,
-    FakeTraineeRepo,
-)
+from fakes import empty_repos
 
-from pacer.demo import Repos, Summary, build_academy
+from pacer.demo import Summary, build_academy
 from pacer.domain import (
     ApprovalKind,
     ApprovalStatus,
@@ -27,22 +18,14 @@ from pacer.domain import (
     StaffRole,
     TraineeStatus,
 )
+from pacer.repositories import Repos
 from pacer.services import ApprovalService, GoalService, TraineeService
 
 AS_OF = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
 
 
 def fake_repos() -> Repos:
-    return Repos(
-        staff=FakeStaffRepo(),
-        cohorts=FakeCohortRepo(),
-        groups=FakeGroupRepo(),
-        trainees=FakeTraineeRepo(),
-        personal_files=FakePersonalFileRepo(),
-        goals=FakeGoalRepo(),
-        goal_updates=FakeGoalUpdateRepo(),
-        approvals=FakeApprovalRequestRepo(),
-    )
+    return empty_repos()
 
 
 @pytest.fixture(scope="module")

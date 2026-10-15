@@ -47,3 +47,83 @@ def test_claude_returns_a_valid_structured_object_through_the_router():
     assert result.value.language == "he"
     assert HEBREW.search(result.value.summary)
     assert 1 <= len(result.value.topics) <= 3
+
+
+# --- the meeting pipeline, with Claude (task 6) ------------------------------------------------------
+
+
+class _Spy:
+    """Wraps the real Claude client and keeps what was sent and what came back, for the asserts."""
+
+    def __init__(self, client) -> None:
+        self._client = client
+        self.model, self.runs_locally, self.native_schema = client.model, client.runs_locally, client.native_schema
+        self.sent: list[str] = []
+        self.received: list[str] = []
+
+    def complete(self, prompt, user_message, **options):
+        self.sent.append(user_message)
+        response = self._client.complete(prompt, user_message, **options)
+        self.received.append(response.text)
+        return response
+
+
+def _run_sample(sample):
+    from fakes import FakeUnitOfWork, empty_repos
+
+    from pacer.ai.anonymization import Anonymizer, load_roster
+    from pacer.ai.meeting_pipeline import MeetingPipeline
+    from pacer.ai.routing import MODELS, ModelSpec, Router
+    from pacer.demo import build_academy
+    from pacer.services import MeetingService
+
+    repos = empty_repos()
+    build_academy(repos)
+    spy = _Spy(claude_client("claude-haiku-5-5"))
+    router = Router(models={**MODELS, "claude-haiku": ModelSpec(runs_locally=False, make_client=lambda: spy)})
+    manager = repos.staff.get(1)
+    meeting = MeetingService(repos.meetings, repos.proposals, repos.tasks, repos.staff).create_meeting(
+        manager,
+        title=sample.title,
+        held_on=sample.held_on,
+        participant_ids=sample.participant_ids,
+        transcript=sample.transcript,
+    )
+    result = MeetingPipeline(FakeUnitOfWork(repos), router).process(manager, meeting.id)
+    anonymizer = Anonymizer(load_roster(repos.staff, repos.trainees))
+    assert not any(anonymizer.contains_known_name(message) for message in spy.sent)  # nothing left here
+    return result, spy
+
+
+def test_claude_extracts_the_weekly_meeting():
+    from datetime import date
+
+    from pacer.demo.meetings import WEEKLY
+
+    result, _ = _run_sample(WEEKLY)
+    by_owner = {p.owner_id: p for p in result.proposals}
+
+    assert 3 <= len(result.proposals) <= 6, [p.description for p in result.proposals]
+    assert {p.owner_id for p in result.proposals} <= {1, 2, 3, 4, 5, None}
+    assert by_owner[5].due_date == date(2026, 10, 15)  # איתי, transport, "עד יום חמישי"
+    assert by_owner[4].due_date == date(2026, 10, 18)  # שירה, seminar, "עד יום ראשון"
+    assert "אדל אזולאי" in by_owner[3].description  # עומר's talk with אדל, name restored here
+    assert not any("האקתון" in p.description for p in result.proposals)  # an idea, not agreed
+    assert all(HEBREW.search(p.description) for p in result.proposals)
+    assert HEBREW.search(result.meeting.summary)
+    assert result.cost_usd is not None and result.cost_usd < 0.01
+
+
+def test_claude_does_not_give_a_task_to_someone_who_was_not_there():
+    from pacer.demo.meetings import SHORT
+
+    import json
+
+    result, spy = _run_sample(SHORT)
+    raw = spy.received[-1]
+    owners = [task["owner"] for task in json.loads(raw[raw.find("{") : raw.rfind("}") + 1])["tasks"]]
+    # The prompt says: only participants own tasks. This checks CLAUDE follows it; even if it did
+    # not, validation would clear the owner (tested with fakes). שירה ([STAFF_4]) was absent.
+    assert "[STAFF_4]" not in owners, owners
+    assert any(p.owner_id == 3 for p in result.proposals)  # עומר: check which זיו
+    assert all("[STAFF_" not in p.description for p in result.proposals)
