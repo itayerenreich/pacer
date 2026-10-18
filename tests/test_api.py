@@ -297,3 +297,10 @@ def test_docs_page_and_schema_are_served(client):
     paths = client.get("/openapi.json").json()["paths"]
     assert "/goals/{goal_id}/progress" in paths
     assert paths["/goals/{goal_id}/progress"]["post"]["requestBody"]
+
+
+def test_list_trainees_shows_only_what_the_actor_may_see(client, world):
+    assert [t["id"] for t in client.get("/trainees", headers=as_(world.manager)).json()] == [world.yael.id]
+    assert client.get("/trainees", headers=as_(world.dana)).json() == []
+    assert client.get("/trainees?status=left", headers=as_(world.manager)).json() == []
+    assert client.get("/trainees?status=nonsense", headers=as_(world.manager)).status_code == 422

@@ -18,7 +18,7 @@ from pacer.repositories.interfaces import (
 )
 
 from .errors import RuleViolationError, found
-from .permissions import is_manager, require
+from .permissions import can_view_trainee, is_manager, require
 from .visibility import visible_trainee
 
 log = logging.getLogger(__name__)
@@ -54,6 +54,19 @@ class TraineeService:
         added = self._trainees.add(trainee)
         log.info("Trainee %s enrolled in group %s by staff %s", added.id, group.id, actor.id)
         return added
+
+    def list(self, actor: StaffMember, status: TraineeStatus | None = None) -> list[Trainee]:
+        """Every trainee this actor may see: all of them for the manager, the trainees of the
+        groups a counselor leads otherwise. Optionally only one status (e.g. active)."""
+        visible_groups: dict[int, bool] = {}
+
+        def visible(trainee: Trainee) -> bool:
+            if trainee.group_id not in visible_groups:
+                group = found(self._groups.get(trainee.group_id), "Group", trainee.group_id)
+                visible_groups[trainee.group_id] = can_view_trainee(actor, group)
+            return visible_groups[trainee.group_id]
+
+        return [t for t in self._trainees.list_all() if (status is None or t.status is status) and visible(t)]
 
     def get(self, actor: StaffMember, trainee_id: int) -> Trainee:
         return visible_trainee(actor, self._trainees, self._groups, trainee_id)

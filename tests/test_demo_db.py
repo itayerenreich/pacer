@@ -50,6 +50,11 @@ def test_the_api_serves_the_demo_academy(engine):
     with TestClient(app) as client:
         pending = client.get("/approvals/pending", headers=manager).json()
         trainee = client.get(f"/trainees/{summary.trainees[0].id}", headers=manager).json()
+        everyone = client.get("/trainees", headers=manager).json()
+        active = client.get("/trainees?status=active", headers=manager).json()
+        noa = client.get("/trainees", headers={"X-Staff-Id": str(summary.counselors[0].id)}).json()
 
     assert len(pending) == 2
+    assert (len(everyone), len(active)) == (35, 33)
+    assert 0 < len(noa) < 35 and {t["group_id"] for t in noa} == {summary.groups[0].id}  # her group only
     assert trainee["first_name"] == summary.trainees[0].first_name  # Hebrew survives the round trip

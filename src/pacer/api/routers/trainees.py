@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, status
 
-from pacer.domain import Goal, PersonalFile, Trainee
+from pacer.domain import Goal, PersonalFile, Trainee, TraineeStatus
 
 from ..dependencies import Actor, GoalServiceDep, TraineeServiceDep
 from ..schemas import GoalCreate, StatusChange, TraineeCreate
@@ -13,6 +13,16 @@ router = APIRouter(prefix="/trainees", tags=["trainees"])
 @router.post("", status_code=status.HTTP_201_CREATED, summary="Enroll a trainee (manager)")
 def enroll_trainee(body: TraineeCreate, actor: Actor, service: TraineeServiceDep) -> Trainee:
     return service.enroll(actor, Trainee(**body.model_dump()))
+
+
+@router.get(
+    "",
+    summary="List the trainees you may see",
+    description="Manager: every trainee. Counselor: the trainees of the groups you lead. "
+    "Optionally only one status, e.g. ?status=active.",
+)
+def list_trainees(actor: Actor, service: TraineeServiceDep, status: TraineeStatus | None = None) -> list[Trainee]:
+    return service.list(actor, status)
 
 
 @router.get("/{trainee_id}", summary="Get a trainee")

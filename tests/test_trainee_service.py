@@ -131,3 +131,17 @@ def test_counselor_cannot_change_status_directly(world, service):
     with pytest.raises(PermissionDeniedError, match="ask the manager"):
         service.change_status(world.noa, world.yael.id, TraineeStatus.LEFT)
     assert world.trainees.get(world.yael.id).status is TraineeStatus.ACTIVE
+
+
+# --- the list ------------------------------------------------------------------------
+
+
+def test_the_list_holds_exactly_the_trainees_each_actor_may_see(world, service):
+    assert service.list(world.manager) == [world.yael]
+    assert service.list(world.noa) == [world.yael]  # leads group A
+    assert service.list(world.dana) == []  # leads group B only
+
+
+def test_the_list_can_be_filtered_by_status(world, service):
+    assert service.list(world.manager, TraineeStatus.ACTIVE) == [world.yael]
+    assert service.list(world.manager, TraineeStatus.LEFT) == []
