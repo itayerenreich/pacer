@@ -16,6 +16,7 @@ from pacer.ai.talk_pipeline import (
     TalkExtraction,
     TalkPipeline,
     is_sensitive,
+    remove_sensitive_sentences,
     talk_service,
     validate_talk,
 )
@@ -311,3 +312,29 @@ def test_a_progress_reason_about_health_is_not_kept_either(source, goals):
     assert result.drafts == []
     assert codes(result) == [(IssueCode.SENSITIVE_TEXT, "progress", 1)]
     assert "ברך" not in result.issues[0].detail
+
+
+# --- sensitive sentences never leave the computer (decision 2026-10-18) ------------------------------
+
+
+def test_the_sentence_about_the_doctor_is_removed_before_sending(uow, repos, itai, cloud):
+    talk_id = record(uow, itai)
+    result = summarize(uow, cloud, itai, talk_id)
+    sent = cloud.calls[-1].user_message
+    assert "רופא" not in sent and "כאבי" not in sent
+    assert "3 ק\"מ ברצף" in sent  # the rest of the notes is all there
+    assert result.removed_sentences == 1
+    assert sent.startswith(repos.talks.get(talk_id).anonymized_notes)  # stored = sent (+ the schema)
+    assert "לרופא" in repos.talks.get(talk_id).notes  # the counselor's own notes are untouched
+
+
+def test_removing_sentences_keeps_the_others_and_the_lines():
+    notes = "רצה 3 ק\"מ. יש לה כאבים בברך! היא מרוצה.\nאובחנה עם משהו\nהיומן התקדם"
+    kept, removed = remove_sensitive_sentences(notes)
+    assert removed == 2
+    assert kept == "רצה 3 ק\"מ. היא מרוצה.\n\nהיומן התקדם"
+
+
+def test_notes_without_sensitive_sentences_are_unchanged():
+    notes = "רצה 3 ק\"מ ברצף. היומן התקדם.\nסיכמנו להיפגש שוב."
+    assert remove_sensitive_sentences(notes) == (notes, 0)

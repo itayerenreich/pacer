@@ -152,6 +152,7 @@ def test_claude_summarizes_the_sample_talk_safely():
     result = TalkPipeline(uow, router).summarize(itai, talk.id)
 
     assert not Anonymizer(load_roster(repos.staff, repos.trainees)).contains_known_name(spy.sent[0])
+    assert "רופא" not in spy.sent[0] and result.removed_sentences == 1  # removed before sending
     progress = [p for p in result.proposals if p.kind is TalkProposalKind.PROGRESS]
     notes = [p for p in result.proposals if p.kind is TalkProposalKind.NOTE]
     assert 63 in {p.goal_id for p in progress}  # running: 2 -> 3 km, out of 5

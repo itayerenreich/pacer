@@ -155,6 +155,9 @@ class SummarizeResult(BaseModel):
     prompt: str
     attempts: int
     cost_usd: float | None
+    removed_sentences: int = Field(
+        description="Sentences about health that were removed before sending; your notes still have them"
+    )
 
     @classmethod
     def of(cls, result: TalkResult) -> "SummarizeResult":
@@ -165,4 +168,5 @@ class SummarizeResult(BaseModel):
             prompt=result.prompt_ref,
             attempts=result.attempts,
             cost_usd=result.cost_usd,
+            removed_sentences=result.removed_sentences,
         )

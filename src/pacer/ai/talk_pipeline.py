@@ -7,10 +7,12 @@ notes for the trainee's long-term memory. The counselor decides on each one.
 The same three rules as the meeting pipeline (see meeting_pipeline.py):
 1. No model call inside a database transaction: short read -> model -> short write, and the write
    locks the talk and checks its status again.
-2. Only anonymized text reaches the cloud. The whole message, header, goal titles and notes, is
-   built first and anonymized as ONE text, so a name in a goal title is caught too, and every
-   [NAME_n] means the same word everywhere in it. The talk's trainee and counselor are "preferred":
-   an ambiguous first name in their own talk is them.
+2. Only anonymized text reaches the cloud, and not all of it. First, every sentence of the notes
+   that touches health or a diagnosis is REMOVED, here, on this computer (decision 2026-10-18:
+   data minimization; the counselor's own notes keep it, in the local database). Then the whole
+   message, header, goal titles and notes, is built and anonymized as ONE text, so a name in a
+   goal title is caught too, and every [NAME_n] means the same word everywhere in it. The talk's
+   trainee and counselor are "preferred": an ambiguous first name in their own talk is them.
 3. The model proposes, code checks, a person decides. Content validation here: the goal must be
    one of this trainee's goals and still open, the progress must change something, no duplicates,
    and nothing about health or a diagnosis is ever proposed to be kept, neither as a note nor as
@@ -147,6 +149,26 @@ def is_sensitive(text: str) -> bool:
     return _SENSITIVE.search(text) is not None
 
 
+# A sentence ends at . ! ? or a line break. Hebrew notes rarely use anything else.
+_SENTENCE_END = re.compile(r"(?<=[.!?\n])")
+
+
+def remove_sensitive_sentences(notes: str) -> tuple[str, int]:
+    """The notes without the sentences about health or a diagnosis, and how many were removed.
+    Runs before anonymization and before anything is sent: what the model never receives, it can
+    never repeat, summarize or propose to remember. Over-matching is the safe direction here too:
+    a removed sentence costs a less complete summary, never a privacy leak."""
+    kept: list[str] = []
+    removed = 0
+    for sentence in _SENTENCE_END.split(notes):
+        if is_sensitive(sentence):
+            removed += 1
+            kept.append("\n" if sentence.endswith("\n") else "")  # keep the line structure
+        else:
+            kept.append(sentence)
+    return "".join(kept), removed
+
+
 @dataclass(frozen=True)
 class ValidatedTalk:
     summary: str  # names restored
@@ -221,6 +243,7 @@ class TalkResult:
     prompt_ref: str
     attempts: int
     cost_usd: float | None
+    removed_sentences: int = 0  # about health, removed before sending; the counselor's notes keep them
 
 
 class TalkPipeline:
@@ -243,8 +266,10 @@ class TalkPipeline:
             goals = repos.goals.list_by_trainee(trainee.id)
             roster = load_roster(repos.staff, repos.trainees)
 
-        # 2. One document, anonymized as a whole. Only safe.text goes to the model.
-        safe = anonymize_talk(roster, trainee, counselor, talk.held_on, goals, talk.notes)
+        # 2. Sensitive sentences out, then one document, anonymized as a whole. Only safe.text goes
+        #    to the model.
+        notes, removed = remove_sensitive_sentences(talk.notes)
+        safe = anonymize_talk(roster, trainee, counselor, talk.held_on, goals, notes)
         if Anonymizer(roster).contains_known_name(safe.text):  # defense in depth, right before sending
             raise AnonymizationError(f"Talk {talk_id}: a known name is in the message; nothing was sent")
 
@@ -266,12 +291,13 @@ class TalkPipeline:
             final = repos.talks.get(talk_id)
 
         log.info(
-            "Talk %s summarized: prompt=%s attempts=%s proposals=%s issues=%s cost=%s",
+            "Talk %s summarized: prompt=%s attempts=%s proposals=%s issues=%s removed_sentences=%s cost=%s",
             talk_id,
             result.prompt_ref,
             result.attempts,
             len(proposals),
             len(validated.issues),
+            removed,
             "unknown" if result.cost_usd is None else f"${result.cost_usd:.6f}",
         )
         return TalkResult(
@@ -281,6 +307,7 @@ class TalkPipeline:
             prompt_ref=result.prompt_ref,
             attempts=result.attempts,
             cost_usd=result.cost_usd,
+            removed_sentences=removed,
         )
 
 
