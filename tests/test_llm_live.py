@@ -163,3 +163,26 @@ def test_claude_summarizes_the_sample_talk_safely():
     assert "כאבי ראש" not in raw[raw.find('"notes"') :]  # and Claude did not even propose them
     assert HEBREW.search(result.talk.summary)
     assert result.cost_usd is not None and result.cost_usd < 0.01
+
+
+# --- embeddings, with the real models in Ollama (stage 4) -------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["bge-m3", "qwen3-embedding-0.6b"])
+def test_a_real_embedding_model_puts_hebrew_meaning_before_shared_words(name):
+    """Needs `ollama pull bge-m3` / `ollama pull qwen3-embedding:0.6b`. The isolation sentence
+    shares no words with the question, the army one shares "חניך"; meaning must win."""
+    from pacer.ai.embeddings import ollama_embedder
+
+    embedder = ollama_embedder(name)
+    question = embedder.embed_query("מה עושים עם חניך שלא משתלב בקבוצה?")
+    lonely, army = embedder.embed_documents(
+        ["כשמישהו מתבודד מהחבר׳ה ויושב לבד בארוחות, כדאי להתחיל בשיחה אישית קצרה",
+         "חניך שמתכונן לגיבוש צריך לרוץ שלוש פעמים בשבוע"]
+    )
+
+    def cosine(a, b):
+        dot = sum(x * y for x, y in zip(a, b, strict=True))
+        return dot / ((sum(x * x for x in a) ** 0.5) * (sum(y * y for y in b) ** 0.5))
+
+    assert cosine(question, lonely) > cosine(question, army)

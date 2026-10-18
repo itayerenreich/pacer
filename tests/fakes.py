@@ -216,14 +216,16 @@ class FakeUnitOfWork:
     @contextmanager
     def __call__(self) -> Iterator[Repos]:
         stores = [getattr(self.repos, name) for name in Repos.__dataclass_fields__]
-        snapshot = [copy.deepcopy(store.rows) for store in stores]
+        kept = ("rows", "embeddings", "_next")  # what each fake store holds
+        snapshot = [{a: copy.deepcopy(getattr(store, a)) for a in kept if hasattr(store, a)} for store in stores]
         self.open += 1
         self.opened += 1
         try:
             yield self.repos
         except BaseException:
-            for store, rows in zip(stores, snapshot, strict=True):
-                store.rows = rows
+            for store, saved in zip(stores, snapshot, strict=True):
+                for attribute, value in saved.items():
+                    setattr(store, attribute, value)
             raise
         finally:
             self.open -= 1

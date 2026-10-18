@@ -93,3 +93,37 @@ class FakeTranscriber:
         if self.error is not None:
             raise self.error
         return self.text
+
+
+class FakeEmbedder:
+    """Embeddings without a model: each word adds 1 to one of 64 positions (by a fixed hash).
+    Texts that share words get close vectors, texts that share none are far apart. Deterministic,
+    instant, and enough to test indexing and search. Records what it embedded."""
+
+    def __init__(self, name: str = "fake-embed", *, runs_locally: bool = True, dimensions: int = 64) -> None:
+        from pacer.ai.embeddings import EmbeddingSpec
+
+        self.spec = EmbeddingSpec(name=name, litellm_model=f"fake/{name}", dimensions=dimensions)
+        self.runs_locally = runs_locally
+        self.documents: list[str] = []
+        self.queries: list[str] = []
+        self.calls = 0
+
+    def _vector(self, text: str) -> list[float]:
+        import zlib
+
+        vector = [0.0] * self.spec.dimensions
+        for word in text.split():
+            vector[zlib.crc32(word.strip(".,:;!?\"'״׳").encode()) % self.spec.dimensions] += 1.0
+        if not any(vector):
+            vector[0] = 1e-6  # never a zero vector
+        return vector
+
+    def embed_documents(self, texts) -> list[list[float]]:
+        self.calls += 1
+        self.documents += list(texts)
+        return [self._vector(t) for t in texts]
+
+    def embed_query(self, text: str) -> list[float]:
+        self.queries.append(text)
+        return self._vector(text)

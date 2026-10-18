@@ -107,7 +107,8 @@ _ERROR_MAP: list[tuple[type[Exception], type[LLMError]]] = [
 ]
 
 
-def _translate(error: Exception) -> LLMError:
+def translate_error(error: Exception) -> LLMError:
+    """A provider exception as one of OUR errors (LLMError and subclasses)."""
     for source, target in _ERROR_MAP:
         if isinstance(error, source):
             return target(str(error))
@@ -162,7 +163,7 @@ class LiteLLMClient:
         try:
             raw = litellm.completion(**self._request(prompt, user_message, max_tokens, response_schema))
         except Exception as error:  # every provider failure leaves as one of OUR errors
-            translated = _translate(error)
+            translated = translate_error(error)
             log.warning(
                 "LLM call failed: prompt=%s model=%s error=%s",
                 prompt.ref,
