@@ -42,7 +42,9 @@ def cost_usd(model: str, input_tokens: int, output_tokens: int) -> float | None:
     price = PRICES.get(model)
     if price is None:
         return None
-    is_long = price.long_prompt_tokens is not None and input_tokens > price.long_prompt_tokens
-    input_rate = price.long_input if is_long else price.input
-    output_rate = price.long_output if is_long else price.output
+    input_rate, output_rate = price.input, price.output
+    if price.long_prompt_tokens is not None and input_tokens > price.long_prompt_tokens:
+        if price.long_input is None or price.long_output is None:
+            return None  # a long-prompt threshold without its rates: unknown, never a guess
+        input_rate, output_rate = price.long_input, price.long_output
     return (input_tokens * input_rate + output_tokens * output_rate) / 1_000_000

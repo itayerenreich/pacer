@@ -12,6 +12,7 @@ from fakes import World
 
 from pacer.ai.anonymization import (
     PREFIX_LETTERS,
+    AnonymizationError,
     AnonymizedText,
     Anonymizer,
     Person,
@@ -71,7 +72,7 @@ def test_text_without_names_is_unchanged(anonymizer):
     ("text", "expected"),
     [
         ("דיברתי עם מאיה ולמאיה", "דיברתי עם [TRAINEE_6] ול[TRAINEE_6]"),
-        ("ושחר הגיע", "ו[TRAINEE_3] הגיע"),
+        ("ומאיה הגיעה", "ו[TRAINEE_6] הגיעה"),
         ("כשמאיה סיימה", "כש[TRAINEE_6] סיימה"),
         ("מנועה קיבלתי", "מ[STAFF_2] קיבלתי"),
         ("וכשהדר באה", "וכש[TRAINEE_5] באה"),
@@ -82,9 +83,13 @@ def test_prefix_letters_stay_and_the_name_becomes_a_token(anonymizer, text, expe
     assert anon(anonymizer, text) == expected
 
 
-def test_four_prefix_letters_are_beyond_hebrew_and_not_matched(anonymizer):
-    """Hebrew stacks at most three prefix letters ("וכש"). A documented, tested limit."""
-    assert anon(anonymizer, "ושכשהדר באה") == "ושכשהדר באה"
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [("וכשלמאיה יש בעיה", "וכשל[TRAINEE_6] יש בעיה"), ("ושכשהדר באה", "ושכש[TRAINEE_5] באה")],
+)
+def test_any_number_of_prefix_letters_is_matched(anonymizer, text, expected):
+    """"וכשלמאיה" is ordinary Hebrew (ו+כש+ל). An earlier limit of three let it through (review 2026-10-18)."""
+    assert anon(anonymizer, text) == expected
 
 
 def test_a_name_that_starts_with_a_prefix_letter_is_kept_whole(anonymizer):
@@ -102,20 +107,134 @@ def test_every_name_with_every_prefix_combination_is_caught(anonymizer):
         assert not anonymizer.contains_known_name(result.text), (prefix, form)
 
 
-# --- names that are also words: over-masking ----------------------------------------------------
+# --- names that are also words: masked, but as the WORD (COMMON_WORD_NAMES) -------------------
 
 
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        ("קמנו בשחר לריצה", "קמנו ב[TRAINEE_3] לריצה"),  # dawn
-        ("היה טל על הדשא", "היה [TRAINEE_4] על הדשא"),  # dew
-        ("הבן של השכנים", "ה[TRAINEE_9] של השכנים"),  # son
+        ("קמנו בשחר לריצה", "קמנו ב[NAME_1] לריצה"),  # dawn
+        ("היה טל על הדשא", "היה [NAME_1] על הדשא"),  # dew
+        ("הבן של השכנים", "ה[NAME_1] של השכנים"),  # son
     ],
 )
-def test_names_that_are_also_words_are_masked_anyway(anonymizer, text, expected):
-    """The safe direction of error: an odd sentence for the model, never a name that leaks."""
-    assert anon(anonymizer, text) == expected
+def test_names_that_are_also_words_are_masked_with_a_neutral_token(anonymizer, text, expected):
+    """Still the safe direction (the word never leaves as-is), but the token points to no one."""
+    safe = anonymizer.anonymize(text)
+    assert safe.text == expected
+    assert deanonymize(safe.text, safe) == text  # back to the word, not to a person
+    assert not safe.people
+
+
+def test_kvar_does_not_come_back_as_yael_bar():
+    """The case from the real run on 2026-10-15: "כבר" is כ + בר, and בר is a trainee's last name.
+    Before the fix, Claude's summary came back as "שלחתי אותו כיעל בר"."""
+    anonymizer = Anonymizer(Roster([Person(T, 14, "יעל", "בר"), Person(S, 1, "רונית", "שמעוני")]))
+    safe = anonymizer.anonymize("רונית: שלחתי אותו כבר אתמול. יעל בר תבדוק.")
+    assert safe.text == "[STAFF_1]: שלחתי אותו כ[NAME_1] אתמול. [TRAINEE_14] תבדוק."  # full name: her
+    answer = "[STAFF_1] שלחה את הלו״ז כ[NAME_1] אתמול, ו[TRAINEE_14] תבדוק."
+    assert deanonymize(answer, safe) == "רונית שמעוני שלחה את הלו״ז כבר אתמול, ויעל בר תבדוק."
+
+
+def test_a_common_word_name_is_the_person_only_when_unique_in_the_academy_and_in_context():
+    gal = Person(S, 11, "גל", "מימון")
+    roster = Roster([*PEOPLE, gal])  # the only גל in the academy
+    anonymizer = Anonymizer(roster)
+    assert anonymizer.anonymize("גל, תתאם", known=[gal]).text == "[STAFF_11], תתאם"  # at the meeting
+    assert anonymizer.anonymize("גל, תתאם").text == "[NAME_1], תתאם"  # not in the context: the word
+    assert anonymizer.anonymize("וגל יבדוק", known=[gal]).text == "ו[NAME_1] יבדוק"  # a prefix: the word
+
+
+def test_context_never_breaks_a_tie_for_a_common_word_name():
+    """Review 2026-10-18: counselor טל כהן at the meeting, trainee טל לוי discussed. "טל לא הגיע"
+    must not become the counselor: two people are named טל, so it stays neutral."""
+    tal_staff, tal_trainee = Person(S, 2, "טל", "כהן"), Person(T, 5, "טל", "לוי")
+    anonymizer = Anonymizer(Roster([tal_staff, tal_trainee]))
+    assert anonymizer.anonymize("טל לא הגיע לשיחה", known=[tal_staff]).text == "[NAME_1] לא הגיע לשיחה"
+
+
+def test_a_prefixed_common_word_is_never_the_person_even_in_their_own_talk():
+    """Review 2026-10-18: in a talk with יעל בר, "כבר דיברנו" must not come back as "כיעל בר"."""
+    yael_bar = Person(T, 1, "יעל", "בר")
+    anonymizer = Anonymizer(Roster([yael_bar]))
+    safe = anonymizer.anonymize("כבר דיברנו על זה", prefer=[yael_bar])
+    assert safe.text == "כ[NAME_1] דיברנו על זה"
+    assert deanonymize(safe.text, safe) == "כבר דיברנו על זה"
+
+
+def test_monday_is_always_monday():
+    """Review 2026-10-18: with participant שני כהן, "נקבע ליום שני" came back as "ליום שני כהן"."""
+    shani = Person(S, 4, "שני", "כהן")
+    anonymizer = Anonymizer(Roster([shani]))
+    safe = anonymizer.anonymize("שני: נקבע ליום שני", known=[shani])
+    assert safe.text == "[STAFF_4]: נקבע ליום [NAME_1]"
+    assert deanonymize(safe.text, safe) == "שני כהן: נקבע ליום שני"
+
+
+def test_someone_named_in_full_is_the_same_person_later_in_the_text():
+    """Review 2026-10-18: "שחר מזרחי איחר. שחר אמר..." are one person, not two."""
+    shahar = Person(T, 3, "שחר", "מזרחי")
+    anonymizer = Anonymizer(Roster([shahar]))
+    assert anonymizer.anonymize("שחר מזרחי איחר. שחר אמר שהאוטובוס").text == "[TRAINEE_3] איחר. [TRAINEE_3] אמר שהאוטובוס"
+
+
+# --- what the review found could still leak (2026-10-18) ---------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "מאיה5 הגיעה",  # a digit glued to a name
+        "מאיה_ הגיעה",  # an underscore
+        "מָאיָה הגיעה",  # niqqud
+        "מא\u200bיה הגיעה",  # a zero-width space inside the name
+        "מא\u00adיה הגיעה",  # a soft hyphen
+        "\u200fמאיה\u200e הגיעה",  # direction marks around it
+    ],
+)
+def test_a_name_hidden_by_digits_or_invisible_characters_is_still_masked(anonymizer, text):
+    safe = anonymizer.anonymize(text)
+    assert "[TRAINEE_6]" in safe.text
+    assert not anonymizer.contains_known_name(safe.text)
+
+
+@pytest.mark.parametrize("written", ["בר-און", "בר און", "בר\u2011און", "בר\u2014און", "בראון", "בר־און"])
+def test_every_way_of_writing_a_hyphenated_surname(written):
+    noa = Person(T, 2, "נועה", "בר-און")
+    anonymizer = Anonymizer(Roster([noa]))
+    assert anonymizer.anonymize(f"נועה {written} הגיעה").text == "[TRAINEE_2] הגיעה"
+    assert anonymizer.anonymize(f"{written} הגיעה").text == "[TRAINEE_2] הגיעה"
+
+
+def test_each_part_of_a_hyphenated_surname_alone_is_masked():
+    noa = Person(T, 2, "נועה", "בר-און")
+    anonymizer = Anonymizer(Roster([noa]))
+    assert anonymizer.anonymize("און הגיעה").text == "[TRAINEE_2] הגיעה"
+
+
+def test_the_independent_check_catches_what_the_regex_would_miss(anonymizer):
+    """contains_known_name() also looks up every word on its own, without the big regex."""
+    roster = Roster(PEOPLE)
+    roster.pattern = __import__("re").compile(r"(?!)")  # simulate a regex that matches nothing
+    assert Anonymizer(roster).contains_known_name("ולמאיה יש מבחן")
+    assert not Anonymizer(roster).contains_known_name("[TRAINEE_6] טלפון שחררו הדרכה")
+
+
+def test_a_spelling_the_lookup_does_not_know_fails_closed():
+    """Review 2026-10-18: "İris" matched the case-insensitive regex but not the lookup (KeyError).
+    Now it is an AnonymizationError, which stops the request: nothing is sent."""
+    iris = Person(T, 1, "Iris", "Levi")
+    anonymizer = Anonymizer(Roster([iris]))
+    assert anonymizer.anonymize("IRIS and iris").text == "[TRAINEE_1] and [TRAINEE_1]"
+    try:
+        result = anonymizer.anonymize("İris came")
+    except AnonymizationError:
+        return
+    assert "[TRAINEE_1]" in result.text  # or it is masked; never a crash and never a leak
+
+
+def test_a_full_name_with_a_common_word_is_always_the_person(anonymizer):
+    assert anon(anonymizer, "טל בר הגיעה, ושחר ששון גם") == "[TRAINEE_4] הגיעה, ו[TRAINEE_3] גם"
 
 
 @pytest.mark.parametrize("word", ["שחררו", "טלפון", "מטלטל", "בנייה", "ברזל", "הדרכה"])
@@ -220,7 +339,8 @@ def test_the_whole_demo_academy_leaves_no_name_behind():
 def test_a_whole_name_wins_over_prefix_plus_a_shorter_name():
     """מאור and אור are both common names. "מאור" is Maor, not מ + Or: the prefix match must be lazy."""
     anonymizer = Anonymizer(Roster([Person(T, 1, "מאור", "דהן"), Person(T, 2, "אור", "שלו")]))
-    assert anonymizer.anonymize("מאור ואור").text == "[TRAINEE_1] ו[TRAINEE_2]"
+    # אור is also a word ("light"), so alone it is neutral; the point is that מאור is not split
+    assert anonymizer.anonymize("מאור ואור").text == "[TRAINEE_1] ו[NAME_1]"
     assert anonymizer.anonymize("למאור").text == "ל[TRAINEE_1]"
 
 
@@ -286,5 +406,5 @@ def test_who_the_text_is_about_resolves_an_ambiguous_first_name(anonymizer):
 
 def test_preferring_someone_does_not_affect_names_that_are_not_theirs(anonymizer):
     shahar = Person(T, 3, "שחר", "ששון")
-    safe = anonymizer.anonymize("כהן ושחר", prefer=[shahar])
-    assert safe.text == "[NAME_1] ו[TRAINEE_3]"  # כהן fits two others: still ambiguous
+    safe = anonymizer.anonymize("כהן, שחר", prefer=[shahar])
+    assert safe.text == "[NAME_1], [TRAINEE_3]"  # כהן fits two others: still ambiguous

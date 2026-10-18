@@ -16,6 +16,7 @@ from pacer.ai.talk_pipeline import (
     TalkExtraction,
     TalkPipeline,
     is_sensitive,
+    remove_sensitive_sentences,
     talk_service,
     validate_talk,
 )
@@ -84,14 +85,14 @@ def test_notes_become_a_summary_and_proposals_for_the_counselor(uow, repos, itai
     assert notes[0].text == "יעד קטן ומדיד עוזר למאיה גולן להתמיד"  # token -> name, here
     assert notes[2].text.endswith("עם רותם")  # an ambiguous name goes back to the word that was said
     assert "מאיה גולן" in result.talk.summary and "[TRAINEE_" not in result.talk.summary
-    assert result.issues == [] and result.prompt_ref == "talk_summary@v1"
+    assert result.issues == [] and result.prompt_ref == "talk_summary@v2"
     assert repos.goals.get(63).progress == 25  # nothing applied: proposals only
 
 
 def test_the_model_gets_the_pinned_prompt_the_schema_and_the_route_budget(uow, itai, cloud):
     summarize(uow, cloud, itai, record(uow, itai))
     [call] = cloud.calls
-    assert call.prompt.ref == "talk_summary@v1"
+    assert call.prompt.ref == "talk_summary@v2"
     assert call.response_schema == TalkExtraction.model_json_schema()
     assert call.max_tokens == 4000  # ROUTES[SUMMARIZE_TALK]: room for long Hebrew answers
 
@@ -311,3 +312,74 @@ def test_a_progress_reason_about_health_is_not_kept_either(source, goals):
     assert result.drafts == []
     assert codes(result) == [(IssueCode.SENSITIVE_TEXT, "progress", 1)]
     assert "ברך" not in result.issues[0].detail
+
+
+# --- sensitive sentences never leave the computer (decision 2026-10-18) ------------------------------
+
+
+def test_the_sentence_about_the_doctor_is_removed_before_sending(uow, repos, itai, cloud):
+    talk_id = record(uow, itai)
+    result = summarize(uow, cloud, itai, talk_id)
+    sent = cloud.calls[-1].user_message
+    assert "רופא" not in sent and "כאבי" not in sent
+    assert "3 ק\"מ ברצף" in sent  # the rest of the notes is all there
+    assert result.removed_sentences == 1
+    assert sent.startswith(repos.talks.get(talk_id).anonymized_notes)  # stored = sent (+ the schema)
+    assert "לרופא" in repos.talks.get(talk_id).notes  # the counselor's own notes are untouched
+
+
+def test_removing_sentences_keeps_the_others_and_the_lines():
+    notes = "רצה 3 ק\"מ. יש לה כאבים בברך! היא מרוצה.\nאובחנה עם משהו\nהיומן התקדם"
+    kept, removed = remove_sensitive_sentences(notes)
+    assert removed == 2
+    assert kept == "רצה 3 ק\"מ. היא מרוצה.\n\nהיומן התקדם"
+
+
+def test_notes_without_sensitive_sentences_are_unchanged():
+    notes = "רצה 3 ק\"מ ברצף. היומן התקדם.\nסיכמנו להיפגש שוב."
+    assert remove_sensitive_sentences(notes) == (notes, 0)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "חשבה לפגוע בעצמה",
+        "מחשבות אובדניות",
+        "קושי נפשי בתקופה האחרונה",
+        "יש לה מחלת נפש במשפחה",
+        "מתחיל טיפול רגשי",
+        'קבע תור לד"ר כהן',
+        "רופאת המשפחה אמרה",
+        "לוקחת כדורים",
+        "יש לו OCD",
+        "חולת סוכרת",
+        "הלך לפסיכולוגים",
+        "שניהם מאובחנים",
+    ],
+)
+def test_the_review_cases_are_sensitive_too(text):
+    """Review 2026-10-18: each of these slipped through the first word list."""
+    assert is_sensitive(text)
+
+
+def test_a_sentence_that_only_continues_a_removed_one_goes_with_it():
+    kept, removed = remove_sensitive_sentences("יש לו ADHD. לכן הוא לוקח משהו כל בוקר. היומן התקדם.")
+    assert kept == " היומן התקדם."
+    assert removed == 2
+
+
+def test_a_list_under_a_removed_heading_goes_with_it():
+    notes = "בקשר לריטלין:\n- מקבל כל בוקר\n- הצוות יודע\nהיומן התקדם\n"
+    kept, removed = remove_sensitive_sentences(notes)
+    assert "בוקר" not in kept and "הצוות" not in kept and "היומן התקדם" in kept
+    assert removed == 3
+
+
+def test_a_goal_title_about_health_is_withheld(repos):
+    from pacer.ai.talk_pipeline import WITHHELD_TITLE, prepare_talk_message
+
+    trainee, counselor = repos.trainees.get(MAYA.trainee_id), repos.staff.get(MAYA.counselor_id)
+    goals = [*repos.goals.list_by_trainee(trainee.id), Goal(id=999, trainee_id=trainee.id, title="להגיע לכל פגישה עם הפסיכולוגית", category="personal")]
+    safe, removed = prepare_talk_message(load_roster(repos.staff, repos.trainees), trainee, counselor, MAYA.held_on, goals, "שיחה קצרה.")
+    assert "פסיכולוג" not in safe.text and f"goal_id 999: {WITHHELD_TITLE}" in safe.text
+    assert removed == 1

@@ -117,7 +117,7 @@ def test_tasks_mine_and_complete(client, world):
 
     assert [t["id"] for t in client.get("/tasks/mine", headers=as_(world.omer)).json()] == [task_id]
     assert client.get("/tasks/mine", headers=as_(world.noa)).json() == []
-    assert client.post(f"/tasks/{task_id}/complete", headers=as_(world.noa)).status_code == 403
+    assert client.post(f"/tasks/{task_id}/complete", headers=as_(world.noa)).status_code == 404  # not hers
     assert client.post(f"/tasks/{task_id}/complete", headers=as_(world.omer)).json()["status"] == "done"
     assert client.get("/tasks", headers=as_(world.omer)).status_code == 403
     assert len(client.get("/tasks", headers=as_(world.manager)).json()) == 1

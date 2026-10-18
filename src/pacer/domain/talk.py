@@ -20,8 +20,9 @@ the model about a person is not kept anywhere.
 from datetime import UTC, date, datetime
 from typing import Self
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, ConfigDict, Field, model_validator
 
+from .entity import Entity
 from .enums import NoteKind, ProposalStatus, TalkProposalKind, TalkStatus
 from .errors import DomainRuleError
 from .state import require_transition
@@ -46,10 +47,9 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-class PersonalTalk(BaseModel):
+class PersonalTalk(Entity):
     model_config = ConfigDict(validate_assignment=True)
 
-    id: int | None = None
     trainee_id: int
     counselor_id: int  # who held the talk and wrote the notes
     held_on: date
@@ -72,12 +72,11 @@ class PersonalTalk(BaseModel):
         return self.model_validate({**self.model_dump(), **fields, "status": status})
 
 
-class TalkProposal(BaseModel):
+class TalkProposal(Entity):
     """One proposal from a talk: a goal progress update, or a note. Waits for the counselor."""
 
     model_config = ConfigDict(validate_assignment=True)
 
-    id: int | None = None
     talk_id: int
     kind: TalkProposalKind
     # kind=progress
@@ -148,12 +147,11 @@ class TalkProposal(BaseModel):
         )
 
 
-class TraineeNote(BaseModel):
+class TraineeNote(Entity):
     """Approved long-term memory about a trainee: short, educational, attributed."""
 
     model_config = ConfigDict(validate_assignment=True)
 
-    id: int | None = None
     trainee_id: int
     kind: NoteKind
     text: str = Field(min_length=5, max_length=NOTE_MAX_LENGTH)

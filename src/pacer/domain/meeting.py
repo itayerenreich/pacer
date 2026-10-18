@@ -13,8 +13,9 @@ manager recorded as the one who created it.
 from datetime import UTC, date, datetime
 from typing import Self
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, ConfigDict, Field, model_validator
 
+from .entity import Entity
 from .enums import MeetingStatus, ProposalStatus, TaskStatus
 from .errors import DomainRuleError
 from .state import require_transition
@@ -48,10 +49,9 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
-class StaffMeeting(BaseModel):
+class StaffMeeting(Entity):
     model_config = ConfigDict(validate_assignment=True)
 
-    id: int | None = None
     title: str = Field(min_length=2, max_length=200)
     held_on: date
     created_by_id: int
@@ -84,12 +84,11 @@ class StaffMeeting(BaseModel):
         return self.model_validate({**self.model_dump(), **fields, "status": status})
 
 
-class ProposedTask(BaseModel):
+class ProposedTask(Entity):
     """A task the AI proposed. Waits for the manager, who may edit it before approving."""
 
     model_config = ConfigDict(validate_assignment=True)
 
-    id: int | None = None
     meeting_id: int
     description: str = Field(min_length=5, max_length=DESCRIPTION_MAX_LENGTH)
     owner_id: int | None = None  # None when the model's answer named no one we could resolve
@@ -139,12 +138,11 @@ class ProposedTask(BaseModel):
         )
 
 
-class Task(BaseModel):
+class Task(Entity):
     """A real task: approved by the manager, owned by one staff member."""
 
     model_config = ConfigDict(validate_assignment=True)
 
-    id: int | None = None
     description: str = Field(min_length=5, max_length=DESCRIPTION_MAX_LENGTH)
     owner_id: int
     due_date: date | None = None

@@ -74,7 +74,7 @@ def test_the_counselor_flow_from_notes_to_goal_progress_and_memory(client, repos
     talk_id = record(client)
     result = client.post(f"/talks/{talk_id}/summarize", headers=ITAI).json()
     progress, worked, did_not_work, follow_up = result["proposals"]
-    assert result["issues"] == [] and result["prompt"] == "talk_summary@v1"
+    assert result["issues"] == [] and result["prompt"] == "talk_summary@v2"
 
     edited = client.post(f"/talk-proposals/{progress['id']}/approve", json={"progress": 55}, headers=ITAI)
     client.post(f"/talk-proposals/{worked['id']}/approve", headers=ITAI)
@@ -93,7 +93,7 @@ def test_who_may_do_what(client):
     talk_id = record(client)
     assert client.post(f"/trainees/{MAYA.trainee_id}/talks", json=TALK, headers=SHIRA).status_code == 403
     assert client.get(f"/talks/{talk_id}", headers=SHIRA).status_code == 200  # same group: may read
-    assert client.get(f"/talks/{talk_id}", headers=NOA).status_code == 403  # another group
+    assert client.get(f"/talks/{talk_id}", headers=NOA).status_code == 404  # another group: as if it did not exist
     assert client.post(f"/talks/{talk_id}/summarize", headers=SHIRA).status_code == 403
     proposals = client.post(f"/talks/{talk_id}/summarize", headers=MANAGER).json()["proposals"]
     assert client.post(f"/talk-proposals/{proposals[0]['id']}/approve", headers=SHIRA).status_code == 403

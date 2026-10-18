@@ -86,3 +86,15 @@ def test_every_prompt_in_the_repo_loads():
     for name in names:
         for version in available_versions(name):
             assert load_prompt(name, version).ref == f"{name}@v{version}"
+
+
+def test_old_prompt_versions_are_kept_and_the_pipelines_are_pinned_to_the_latest():
+    """A used version is never edited or deleted: old results still point to the exact prompt that
+    made them. v3 / v2 (2026-10-18) say that [NAME_n] may be an ordinary word, not a person."""
+    from pacer.ai.meeting_pipeline import MeetingPipeline
+    from pacer.ai.talk_pipeline import TalkPipeline
+
+    assert available_versions("meeting_extract") == [1, 2, 3]
+    assert available_versions("talk_summary") == [1, 2]
+    assert MeetingPipeline(uow=None, router=None)._prompt.ref == "meeting_extract@v3"  # type: ignore[arg-type]
+    assert TalkPipeline(uow=None, router=None)._prompt.ref == "talk_summary@v2"  # type: ignore[arg-type]

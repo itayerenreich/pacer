@@ -7,11 +7,19 @@ who is asking, whether they may ask, and what happens when a request is approved
 
 import logging
 
-from pacer.domain import ApprovalKind, ApprovalRequest, ApprovalStatus, StaffMember, TraineeStatus
+from pacer.domain import (
+    ApprovalKind,
+    ApprovalRequest,
+    ApprovalStatus,
+    StaffMember,
+    TraineeStatus,
+    present,
+)
 from pacer.repositories.interfaces import ApprovalRequestRepo, GroupRepo, TraineeRepo
 
 from .errors import RuleViolationError, found
-from .permissions import is_manager, leads_group, require
+from .permissions import is_manager, require
+from .visibility import visible_trainee
 
 log = logging.getLogger(__name__)
 
@@ -32,16 +40,16 @@ class ApprovalService:
     ) -> ApprovalRequest:
         if is_manager(actor):
             raise RuleViolationError("The manager does not need approval; act directly")
-        trainee = found(self._trainees.get(trainee_id), "Trainee", trainee_id)
-        group = found(self._groups.get(trainee.group_id), "Group", trainee.group_id)
-        require(leads_group(actor, group), "ask for approvals about a trainee outside your groups")
+        trainee = visible_trainee(actor, self._trainees, self._groups, trainee_id)  # outside your groups: 404
 
-        same = {"kind": kind, "trainee_id": trainee_id, "requested_by_id": actor.id}
-        if self._approvals.exists_with_status(**same, status=ApprovalStatus.PENDING):
+        def exists(status: ApprovalStatus) -> bool:
+            return self._approvals.exists_with_status(
+                kind=kind, trainee_id=trainee_id, requested_by_id=actor.key, status=status
+            )
+
+        if exists(ApprovalStatus.PENDING):
             raise RuleViolationError("You already have a pending request of this kind for this trainee")
-        if kind == ApprovalKind.VIEW_PERSONAL_FILE and self._approvals.exists_with_status(
-            **same, status=ApprovalStatus.APPROVED
-        ):
+        if kind == ApprovalKind.VIEW_PERSONAL_FILE and exists(ApprovalStatus.APPROVED):
             raise RuleViolationError("You already have access to this personal file")
         if kind == ApprovalKind.STATUS_CHANGE and requested_status == trainee.status:
             raise RuleViolationError(f"Trainee {trainee_id} is already {trainee.status}")
@@ -69,13 +77,14 @@ class ApprovalService:
         """
         require(is_manager(actor), "approve requests")
         request = found(self._approvals.get(request_id), "Approval request", request_id)
-        approved = request.approve(actor.id, note)  # InvalidTransitionError unless PENDING
+        approved = request.approve(actor.key, note)  # InvalidTransitionError unless PENDING
         self._approvals.update(approved)
         log.info("Approval request %s (%s) approved by staff %s", request_id, approved.kind, actor.id)
 
         if approved.kind == ApprovalKind.STATUS_CHANGE:
             trainee = found(self._trainees.get(approved.trainee_id), "Trainee", approved.trainee_id)
-            self._trainees.update(trainee.with_status(approved.requested_status))
+            status = present(approved.requested_status, "the requested status of a status change")
+            self._trainees.update(trainee.with_status(status))
             log.info(
                 "Trainee %s: status %s -> %s (request %s)",
                 trainee.id,
@@ -88,7 +97,7 @@ class ApprovalService:
     def reject(self, actor: StaffMember, request_id: int, note: str | None = None) -> ApprovalRequest:
         require(is_manager(actor), "reject requests")
         request = found(self._approvals.get(request_id), "Approval request", request_id)
-        rejected = self._approvals.update(request.reject(actor.id, note))
+        rejected = self._approvals.update(request.reject(actor.key, note))
         log.info("Approval request %s (%s) rejected by staff %s", request_id, rejected.kind, actor.id)
         return rejected
 

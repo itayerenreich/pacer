@@ -64,8 +64,8 @@ def test_a_clean_answer_passes_unchanged_with_names_restored():
 @pytest.mark.parametrize(
     ("owner", "code"),
     [
-        ("[STAFF_4]", IssueCode.OWNER_NOT_PARTICIPANT),  # שירה was not there
-        ("[STAFF_9]", IssueCode.OWNER_NOT_PARTICIPANT),  # invented: no such participant
+        ("[STAFF_9]", IssueCode.OWNER_UNKNOWN),  # invented: not in the text
+        ("[STAFF_16]", IssueCode.OWNER_UNKNOWN),  # 16 is אדל, a TRAINEE: no staff token 16 in the text
         ("[TRAINEE_16]", IssueCode.OWNER_NOT_STAFF),
         ("[NAME_1]", IssueCode.OWNER_AMBIGUOUS),
         ("נועה", IssueCode.OWNER_INVALID),  # not a token
@@ -77,6 +77,23 @@ def test_an_owner_who_cannot_own_the_task_is_cleared_and_reported(owner, code):
     result = validate(task(owner=owner))
     assert result.drafts[0].owner_id is None  # the manager chooses, before approving
     assert codes(result) == [(code, 1)]
+
+
+def test_an_absent_staff_member_named_in_the_text_keeps_the_task_with_a_flag():
+    """שירה ([STAFF_4]) was not there, but the transcript names her: managers give tasks to absent
+    counselors all the time. She stays the owner, and the manager is told to check."""
+    result = validate(task(owner="[STAFF_4]"))
+    assert result.drafts[0].owner_id == 4
+    assert codes(result) == [(IssueCode.OWNER_ABSENT, 1)]
+
+
+def test_a_staff_member_who_is_neither_there_nor_named_is_cleared():
+    """Staff member 5 exists in the academy, but the model never saw a [STAFF_5]: it made it up."""
+    source = Anonymizer(ROSTER).anonymize("רונית: נועה, תתאמי.", known=[ROSTER.find(S, i) for i in PARTICIPANTS])
+    extraction = MeetingExtraction(summary="[STAFF_1] פתחה את הישיבה וסיכמה משימות.", tasks=[task(owner="[STAFF_4]")])
+    result = validate_extraction(extraction, source, held_on=HELD_ON, participant_ids=PARTICIPANTS)
+    assert result.drafts[0].owner_id is None
+    assert codes(result) == [(IssueCode.OWNER_UNKNOWN, 1)]
 
 
 def test_no_owner_is_fine_and_not_an_issue():
@@ -120,10 +137,10 @@ def test_the_same_task_for_the_same_owner_is_listed_once():
 
 
 def test_a_duplicate_after_owner_clearing_is_still_caught():
-    """[STAFF_4] is cleared to no owner, and then equals the earlier task without an owner."""
-    result = validate(task(owner=None), task(owner="[STAFF_4]"))
+    """[STAFF_9] is cleared to no owner, and then equals the earlier task without an owner."""
+    result = validate(task(owner=None), task(owner="[STAFF_9]"))
     assert len(result.drafts) == 1
-    assert codes(result) == [(IssueCode.OWNER_NOT_PARTICIPANT, 2), (IssueCode.DUPLICATE, 2)]
+    assert codes(result) == [(IssueCode.OWNER_UNKNOWN, 2), (IssueCode.DUPLICATE, 2)]
 
 
 # --- tokens the model made up, and lengths -----------------------------------------------------------

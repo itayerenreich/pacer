@@ -144,7 +144,7 @@ class _Builder:
                 ["achieved", "in_progress", "not_started", "dropped"], weights=[20, 60, 12, 8]
             )[0]
             steps = self._progress_steps(outcome)
-            end = self.history_ends.get(trainee.id, self.now)
+            end = self.history_ends.get(trainee.key, self.now)
             times = self._update_times(created, end, len(steps))
 
             new_goal = Goal(
@@ -286,7 +286,7 @@ class _Builder:
                 0.5,
             ),
         ]
-        self.history_ends[leaving.id] = days_ago(9)  # the day the request to leave was made
+        self.history_ends[leaving.key] = days_ago(9)  # the day the request to leave was made
         return requests
 
     def _add_approvals(self, summary: Summary, requests: list[tuple]) -> None:
@@ -310,12 +310,12 @@ class _Builder:
             )
             summary.approvals.append(request)
             if decided and kind == ApprovalKind.STATUS_CHANGE and status == ApprovalStatus.APPROVED:
-                self._apply_status(summary, trainee, requested)
+                self._apply_status(summary, trainee, requested, at=created + timedelta(hours=20))
 
-    def _apply_status(self, summary: Summary, trainee: Trainee, status: TraineeStatus) -> None:
-        updated = self.r.trainees.update(trainee.with_status(status))
+    def _apply_status(self, summary: Summary, trainee: Trainee, status: TraineeStatus, *, at: datetime) -> None:
+        updated = self.r.trainees.update(trainee.with_status(status, at=at))
         summary.trainees[[t.id for t in summary.trainees].index(trainee.id)] = updated
         if status == TraineeStatus.LEFT:  # unfinished goals of a trainee who left are dropped
-            for goal in self.r.goals.list_by_trainee(trainee.id):
+            for goal in self.r.goals.list_by_trainee(trainee.key):
                 if goal.status in (GoalStatus.NOT_STARTED, GoalStatus.IN_PROGRESS):
                     self.r.goals.update(goal.model_copy(update={"status": GoalStatus.DROPPED}))

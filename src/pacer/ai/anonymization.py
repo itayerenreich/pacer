@@ -17,6 +17,12 @@ Hebrew makes this harder than it looks:
 * Many names are also ordinary words: טל (dew), שחר (dawn), אגם (lake), בר. The policy is
   OVER-MASKING: when in doubt, replace. "בשחר" (at dawn) becomes "ב[TRAINEE_3]"; a slightly
   odd sentence for the model is far better than a name leaving the computer.
+* For the most common of those words (COMMON_WORD_NAMES: "כבר" is כ + בר!) a lone word is
+  still masked, but with a neutral [NAME_n] token that turns back into the WORD, not into a
+  person: otherwise "שלחתי אותו כבר" came back from the model as "שלחתי אותו כיעל בר", a
+  sentence wrongly tied to a real trainee (decision 2026-10-15). The exception is context: when
+  exactly one person in it (a meeting's participants, a talk's trainee and counselor) has that
+  name, the word is that person. A full name ("יעל בר") is always the person.
 * A first name alone may fit two people (two trainees named יעל). Full names are resolved to
   the right person; an ambiguous first name gets a neutral token ([NAME_1]) that points to no
   one, and the result reports it so a person can resolve it.
@@ -42,30 +48,57 @@ from types import MappingProxyType
 from pacer.repositories.interfaces import StaffRepo, TraineeRepo
 
 PREFIX_LETTERS = "ובכלמשה"
-_NOT_WORD_BEFORE = r"(?<!\w)"  # \w includes Hebrew letters in Python 3 regexes
-_NOT_WORD_AFTER = r"(?!\w)"
+# A name ends where LETTERS end. Not \w: that includes digits and "_", so "מאיה5" or "dana_" would
+# hide a name from the match. [^\W\d_] is "a letter" (Hebrew or Latin) in Python 3 regexes.
+_LETTER = r"[^\W\d_]"
+_NOT_LETTER_BEFORE = rf"(?<!{_LETTER})"
+_NOT_LETTER_AFTER = rf"(?!{_LETTER})"
+# Invisible characters that split a name without changing how it looks: niqqud and cantillation,
+# zero-width characters, the soft hyphen, and direction marks. Removed from the text first.
+_INVISIBLE = re.compile("[\u0591-\u05c7\u00ad\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]")
+# Separators inside a name: spaces and every kind of hyphen and dash. "בר-און", "בר און", "בר־און",
+# "בר‑און" and even "בראון" are the same last name.
+_SEPARATORS = " -\u05be\u2010\u2011\u2012\u2013\u2014\u2212"
+_SEPARATOR = re.compile(f"[\\s{re.escape(_SEPARATORS[1:])}]+")
+# Names that are also everyday words. The test for this list is how common the WORD is in speech,
+# not how common the name is ("רון" is not here: as a word it is rare). Add to it when a case shows up.
+COMMON_WORD_NAMES = frozenset(
+    {"בר", "טל", "שחר", "בן", "אור", "אלה", "נתן", "שלו", "שני", "רעות", "ארז", "אלון", "חן", "גל", "דור"}
+)
+# Where a common-word name is always the word, whoever is in the context: "יום שני" is Monday.
+_ALWAYS_THE_WORD_AFTER = {"שני": re.compile(r"יום\s*$")}
 _TOKEN = re.compile(r"\[(?:TRAINEE|STAFF)_\d+\]|\[NAME_\d+\]")
+# A word for the independent check: letters, with apostrophes and quotes inside (ג'ני, צה"ל).
+_WORD = re.compile(r"[^\W\d_](?:[^\W\d_]|['׳’`´\"״“”])*")
 # Characters that are written in several ways, and the one form we compare by.
-_VARIANTS = {"'": "'׳’`´", '"': '"״“”', "-": "-־–"}
+_VARIANTS = {"'": "'׳’`´", '"': '"״“”'}
 _CANONICAL = {variant: canonical for canonical, variants in _VARIANTS.items() for variant in variants}
 
 
+def _clean(text: str) -> str:
+    """The text without invisible characters. Done before matching AND before sending."""
+    return _INVISIBLE.sub("", text)
+
+
 def _normalize(form: str) -> str:
-    """One way to write a name: single spaces, canonical apostrophe/quote/hyphen, lower case."""
-    return "".join(_CANONICAL.get(ch, ch) for ch in " ".join(form.split())).lower()
+    """One way to write a name, to compare by: no invisible characters, no separators at all
+    (spaces and hyphens), canonical apostrophe and quote, case-folded (Dana, dana, DANA)."""
+    return _SEPARATOR.sub("", "".join(_CANONICAL.get(ch, ch) for ch in _clean(form))).casefold()
+
+
+def _parts(name: str) -> list[str]:
+    """The words of a name, split on spaces AND hyphens: "בר-און" -> ["בר", "און"]."""
+    return [part for part in _SEPARATOR.split(_clean(name)) if part]
 
 
 def _regex_for(form: str) -> str:
-    """A normalized form as a regex that also matches its other spellings."""
-    parts = []
-    for ch in form:
-        if ch == " ":
-            parts.append(r"\s+")
-        elif ch in _VARIANTS:
-            parts.append(f"[{re.escape(_VARIANTS[ch])}]")
-        else:
-            parts.append(re.escape(ch))
-    return "".join(parts)
+    """A form as a regex that matches its other spellings: any separator (or none) between its
+    words, and every way of writing an apostrophe or a quote."""
+    words = []
+    for word in _parts(form):
+        canonical = (_CANONICAL.get(c, c) for c in word)
+        words.append("".join(f"[{re.escape(_VARIANTS[c])}]" if c in _VARIANTS else re.escape(c) for c in canonical))
+    return rf"[\s{re.escape(_SEPARATORS[1:])}]*".join(words)
 
 
 class PersonKind(StrEnum):
@@ -131,22 +164,47 @@ class Roster:
             for form in _forms_of(person):
                 forms[_normalize(form)].add(person)
         forms.pop("", None)
+        # Every single word of every name, normalized, for the independent check
+        # (contains_known_name): it does not use the big regex, so a bug in one is caught by the other.
+        self._words = frozenset(
+            {_normalize(part) for person in self.people for form in _forms_of(person) for part in _parts(form)}
+            | set(forms)
+        )
         # A form fits one person, or several (ambiguous). Longest first, so a full name wins over
         # the first name inside it. Keys are normalized: look them up with _normalize(surface).
         self.forms: Mapping[str, frozenset[Person]] = MappingProxyType(
             {form: frozenset(people) for form, people in sorted(forms.items(), key=lambda kv: -len(kv[0]))}
         )
-        alternatives = "|".join(_regex_for(form) for form in self.forms)
+        # The regex is built from the forms as WRITTEN (the keys have no separators left), longest first.
+        written = {form for person in self.people for form in _forms_of(person) if _normalize(form)}
+        alternatives = "|".join(_regex_for(form) for form in sorted(written, key=lambda f: -len(_normalize(f))))
         self._by_key = {(person.kind, person.id): person for person in self.people}
+        # Any number of prefix letters ("וכשלמאיה" is ו+כש+ל), lazily: first try the whole word as a
+        # name, so "מאור" is Maor, not מ + אור.
         self.pattern = re.compile(
-            rf"{_NOT_WORD_BEFORE}(?P<prefix>[{PREFIX_LETTERS}]{{0,3}}?)(?P<name>{alternatives}){_NOT_WORD_AFTER}"
+            rf"{_NOT_LETTER_BEFORE}(?P<prefix>[{PREFIX_LETTERS}]*?)(?P<name>{alternatives}){_NOT_LETTER_AFTER}"
             if alternatives
             else r"(?!)",  # an empty roster matches nothing
             re.IGNORECASE,  # Latin letters: Dana, dana, DANA. Hebrew has no case
         )
 
     def candidates(self, surface: str) -> frozenset[Person]:
-        return self.forms[_normalize(surface)]
+        found = self.forms.get(_normalize(surface))
+        if found is None:  # the regex matched a spelling the lookup does not know: never guess
+            raise AnonymizationError("A name matched, but could not be looked up; nothing may be sent")
+        return found
+
+    def has_name_in(self, text: str) -> bool:
+        """Independent of `pattern`: split the text into words, peel any prefix letters off each,
+        and look the rest up in the set of every name word. Tokens ([STAFF_3]) are not names."""
+        for match in _WORD.finditer(_clean(_TOKEN.sub(" ", text))):
+            word = _normalize(match.group())
+            for start in range(len(word)):
+                if word[start:] in self._words:
+                    return True
+                if word[start] not in PREFIX_LETTERS:
+                    break
+        return False
 
 
     def find(self, kind: PersonKind, person_id: int) -> Person | None:
@@ -164,21 +222,46 @@ class Anonymizer:
                    (e.g. the participants of a meeting), so their tokens in the answer map back.
         prefer: who the text is about. When a name fits several people and exactly one of them
                 is preferred, it is that one (in a talk with Yael Mizrahi, "יעל" is her, not the
-                other Yael). Otherwise an ambiguous name still gets a neutral [NAME_n] token."""
+                other Yael). Otherwise an ambiguous name still gets a neutral [NAME_n] token.
+        A name that is also a common word (COMMON_WORD_NAMES) is a person only when exactly one
+        person in the context (known + prefer) has it; otherwise it gets a neutral [NAME_n]."""
         people: dict[str, Person] = {person.token: person for person in known}
         preferred = frozenset(prefer)
+        context = set(preferred) | set(people.values())  # grows with every name resolved in full
         unresolved: dict[str, str] = {}
         ambiguous_tokens: dict[str, str] = {}  # the same ambiguous word gets the same token
+        text = _clean(text)
+
+        def resolve(match: re.Match) -> Person | None:
+            surface, prefix = match["name"], match["prefix"]
+            candidates = self._roster.candidates(surface)
+            if _normalize(surface) in COMMON_WORD_NAMES:
+                # As much a word as a name. It is a person only when the name fits exactly ONE person
+                # in the whole roster, that person is in the context, it carries no prefix ("כבר" is
+                # never כ + בר), and it is not a fixed phrase ("יום שני"). Context never breaks a tie.
+                always_word = _ALWAYS_THE_WORD_AFTER.get(_normalize(surface))
+                if (
+                    prefix
+                    or len(candidates) != 1
+                    or not candidates <= context
+                    or (always_word is not None and always_word.search(text, 0, match.start()))
+                ):
+                    return None
+            elif len(candidates) > 1 and len(candidates & preferred) == 1:
+                candidates = candidates & preferred
+            if len(candidates) != 1:
+                return None
+            (person,) = candidates
+            return person
 
         def replace(match: re.Match) -> str:
-            surface = " ".join(match["name"].split())
-            candidates = self._roster.candidates(surface)
-            if len(candidates) > 1 and len(candidates & preferred) == 1:
-                candidates = candidates & preferred
-            if len(candidates) == 1:
-                (person,) = candidates
+            person = resolve(match)
+            if person is not None:
                 people[person.token] = person
+                if len(_parts(match["name"])) > 1:  # named in full: later, "שחר" alone may be them
+                    context.add(person)
                 return match["prefix"] + person.token
+            surface = " ".join(match["name"].split())
             key = _normalize(surface)  # "Dana" and "dana" are the same ambiguous name
             if key not in ambiguous_tokens:
                 ambiguous_tokens[key] = f"[NAME_{len(ambiguous_tokens) + 1}]"
@@ -186,7 +269,7 @@ class Anonymizer:
             return match["prefix"] + ambiguous_tokens[key]
 
         result = self._roster.pattern.sub(replace, text)
-        if self._roster.pattern.search(result):  # defense in depth: should never happen
+        if self.contains_known_name(result):  # defense in depth, with an independent check too
             raise AnonymizationError("A known name is still present after anonymization")
         return AnonymizedText(
             text=result,
@@ -196,7 +279,10 @@ class Anonymizer:
         )
 
     def contains_known_name(self, text: str) -> bool:
-        return self._roster.pattern.search(text) is not None
+        """Two different checks, so a bug in one is caught by the other: the matching regex, and a
+        word-by-word lookup that does not use it (Roster.has_name_in)."""
+        cleaned = _clean(text)
+        return self._roster.pattern.search(cleaned) is not None or self._roster.has_name_in(cleaned)
 
 
 def deanonymize(text: str, source: AnonymizedText) -> str:
@@ -220,16 +306,17 @@ def tokens_in(text: str) -> list[str]:
 def load_roster(staff: StaffRepo, trainees: TraineeRepo) -> Roster:
     """Everyone whose name may appear: all staff, and all trainees in every status (a trainee
     who left is still a person whose name must not leave the computer)."""
-    people = [Person(PersonKind.STAFF, s.id, *_split_name(s.full_name)) for s in staff.list_all()]
-    people += [Person(PersonKind.TRAINEE, t.id, t.first_name, t.last_name) for t in trainees.list_all()]
+    people = [Person(PersonKind.STAFF, s.key, *_split_name(s.full_name)) for s in staff.list_all()]
+    people += [Person(PersonKind.TRAINEE, t.key, t.first_name, t.last_name) for t in trainees.list_all()]
     return Roster(people)
 
 
 def _forms_of(person: Person) -> list[str]:
-    """Full name, first name, last name, and each word of a first or last name with several."""
+    """Full name, first name, last name, and each word of a first or last name with several
+    (split on spaces AND hyphens: "בר-און" gives "בר" and "און" too)."""
     forms = [person.full_name, person.first_name, person.last_name]
     for name in (person.first_name, person.last_name):
-        words = name.split()
+        words = _parts(name)
         if len(words) > 1:
             forms += [word for word in words if len(word) > 1]
     return forms

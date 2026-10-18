@@ -1,5 +1,7 @@
 """Persistence for staff meetings (with their participants), proposed tasks and tasks."""
 
+from collections.abc import Sequence
+
 from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
@@ -59,7 +61,7 @@ class MeetingRepository:
         )
 
     def _to_domain(self, row: StaffMeetingRow) -> StaffMeeting:
-        participant_ids = self._session.scalars(
+        participant_ids: Sequence[int] = self._session.scalars(
             select(meeting_participants.c.staff_id)
             .where(meeting_participants.c.meeting_id == row.id)
             .order_by(meeting_participants.c.staff_id)

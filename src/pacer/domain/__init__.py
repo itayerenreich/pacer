@@ -5,6 +5,7 @@ Pure data and rules. Must not import from any other layer.
 
 from .approval import ApprovalRequest
 from .cohort import Cohort, Group
+from .entity import Entity, present
 from .enums import (
     ApprovalKind,
     ApprovalStatus,
@@ -28,6 +29,8 @@ from .talk import PersonalTalk, TalkProposal, TraineeNote
 from .trainee import PersonalFile, Trainee
 
 __all__ = [
+    "Entity",
+    "present",
     "ApprovalKind",
     "ApprovalRequest",
     "ApprovalStatus",

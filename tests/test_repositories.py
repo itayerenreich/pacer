@@ -158,10 +158,9 @@ def test_failed_unit_of_work_saves_nothing(engine):
     """If anything inside the block raises, the whole transaction is rolled back."""
     seed = seed_group(engine)
 
-    with pytest.raises(RuntimeError):
-        with unit_of_work(engine) as session:
-            TraineeRepository(session).add(make_trainee(seed))
-            raise RuntimeError("something failed halfway")
+    with pytest.raises(RuntimeError), unit_of_work(engine) as session:
+        TraineeRepository(session).add(make_trainee(seed))
+        raise RuntimeError("something failed halfway")
 
     with unit_of_work(engine) as session:
         assert TraineeRepository(session).list_by_group(seed.group_id) == []
@@ -171,6 +170,5 @@ def test_trainee_in_missing_group_is_rejected(engine):
     """The database itself enforces the foreign key, even if the code forgets to check."""
     seed = seed_group(engine)
 
-    with pytest.raises(IntegrityError):
-        with unit_of_work(engine) as session:
-            TraineeRepository(session).add(make_trainee(seed, group_id=9999))
+    with pytest.raises(IntegrityError), unit_of_work(engine) as session:
+        TraineeRepository(session).add(make_trainee(seed, group_id=9999))

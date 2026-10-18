@@ -95,8 +95,10 @@ async def _error_response(request: Request, exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=code, content={"detail": detail})
 
 
-async def _validation_error_response(request: Request, exc: ValidationError) -> JSONResponse:
+async def _validation_error_response(request: Request, exc: Exception) -> JSONResponse:
     """A domain model rejected a value that got past the request schema."""
+    if not isinstance(exc, ValidationError):  # registered for ValidationError only; Starlette types it wider
+        raise TypeError(f"Expected a ValidationError, got {type(exc).__name__}")
     errors = exc.errors(include_url=False, include_context=False, include_input=False)
     return JSONResponse(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, content={"detail": errors})
 

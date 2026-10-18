@@ -6,7 +6,7 @@ domain layer; repositories translate between domain models and these rows.
 
 from datetime import date, datetime
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, String, Table, Text
+from sqlalchemy import JSON, CheckConstraint, Column, DateTime, ForeignKey, String, Table, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -52,6 +52,13 @@ class GroupRow(Base):
 class TraineeRow(Base):
     __tablename__ = "trainees"
 
+    __table_args__ = (
+        CheckConstraint(
+            "(status IN ('left', 'graduated')) = (closed_at IS NOT NULL)",
+            name="ck_trainees_closed_at_matches_status",
+        ),
+    )
+
     id: Mapped[int] = mapped_column(primary_key=True)
     first_name: Mapped[str] = mapped_column(String(50))
     last_name: Mapped[str] = mapped_column(String(50))
@@ -59,6 +66,7 @@ class TraineeRow(Base):
     group_id: Mapped[int] = mapped_column(ForeignKey("groups.id"), index=True)
     primary_counselor_id: Mapped[int] = mapped_column(ForeignKey("staff_members.id"), index=True)
     status: Mapped[str] = mapped_column(String(20))
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class PersonalFileRow(Base):

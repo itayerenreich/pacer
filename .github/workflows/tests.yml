@@ -29,5 +29,11 @@ jobs:
       - name: Install dependencies exactly as locked
         run: uv sync --locked  # fails if uv.lock does not match pyproject.toml
 
+      - name: Lint (ruff)
+        run: uv run --with ruff==0.14.0 ruff check src tests
+
+      - name: Type check (mypy)
+        run: uv run mypy
+
       - name: Run all tests (fast + integration)
         run: uv run pytest -v

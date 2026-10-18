@@ -17,7 +17,8 @@ class IssueCode(StrEnum):
     OWNER_INVALID = "owner_invalid"  # not a token at all
     OWNER_AMBIGUOUS = "owner_ambiguous"  # [NAME_n]: the name fits more than one person
     OWNER_NOT_STAFF = "owner_not_staff"  # a trainee cannot own a staff task
-    OWNER_NOT_PARTICIPANT = "owner_not_participant"
+    OWNER_UNKNOWN = "owner_unknown"  # a staff token that is not in the text the model received: invented
+    OWNER_ABSENT = "owner_absent"  # kept: named in the meeting but not there. The manager should check
     DUE_BEFORE_MEETING = "due_before_meeting"
     DUE_TOO_FAR = "due_too_far"
     DESCRIPTION_SHORTENED = "description_shortened"

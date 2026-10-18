@@ -10,10 +10,16 @@ from pacer.domain import (
     Trainee,
     TraineeStatus,
 )
-from pacer.repositories.interfaces import ApprovalRequestRepo, GroupRepo, PersonalFileRepo, TraineeRepo
+from pacer.repositories.interfaces import (
+    ApprovalRequestRepo,
+    GroupRepo,
+    PersonalFileRepo,
+    TraineeRepo,
+)
 
 from .errors import RuleViolationError, found
-from .permissions import can_view_trainee, is_manager, leads_group, require
+from .permissions import can_view_trainee, is_manager, require
+from .visibility import visible_trainee
 
 log = logging.getLogger(__name__)
 
@@ -49,26 +55,34 @@ class TraineeService:
         log.info("Trainee %s enrolled in group %s by staff %s", added.id, group.id, actor.id)
         return added
 
+    def list(self, actor: StaffMember, status: TraineeStatus | None = None) -> list[Trainee]:
+        """Every trainee this actor may see: all of them for the manager, the trainees of the
+        groups a counselor leads otherwise. Optionally only one status (e.g. active)."""
+        visible_groups: dict[int, bool] = {}
+
+        def visible(trainee: Trainee) -> bool:
+            if trainee.group_id not in visible_groups:
+                group = found(self._groups.get(trainee.group_id), "Group", trainee.group_id)
+                visible_groups[trainee.group_id] = can_view_trainee(actor, group)
+            return visible_groups[trainee.group_id]
+
+        return [t for t in self._trainees.list_all() if (status is None or t.status is status) and visible(t)]
+
     def get(self, actor: StaffMember, trainee_id: int) -> Trainee:
-        trainee = found(self._trainees.get(trainee_id), "Trainee", trainee_id)
-        group = found(self._groups.get(trainee.group_id), "Group", trainee.group_id)
-        require(can_view_trainee(actor, group), "view this trainee")
-        return trainee
+        return visible_trainee(actor, self._trainees, self._groups, trainee_id)
 
     def get_personal_file(self, actor: StaffMember, trainee_id: int) -> PersonalFile:
-        """Manager: always. Counselor: only one who leads the group AND has an approved request."""
-        trainee = found(self._trainees.get(trainee_id), "Trainee", trainee_id)
+        """Manager: always. Counselor: only one who leads the group AND has an approved request.
+        A counselor who cannot see the trainee at all gets 404; one who can, but has no approval, 403."""
+        visible_trainee(actor, self._trainees, self._groups, trainee_id)
         if not is_manager(actor):
-            group = found(self._groups.get(trainee.group_id), "Group", trainee.group_id)
             approved = self._approvals.exists_with_status(
                 kind=ApprovalKind.VIEW_PERSONAL_FILE,
                 trainee_id=trainee_id,
-                requested_by_id=actor.id,
+                requested_by_id=actor.key,
                 status=ApprovalStatus.APPROVED,
             )
-            require(
-                leads_group(actor, group) and approved, "view this personal file without manager approval"
-            )
+            require(approved, "view this personal file without manager approval")
         personal_file = found(
             self._personal_files.get_by_trainee(trainee_id), "Personal file of trainee", trainee_id
         )

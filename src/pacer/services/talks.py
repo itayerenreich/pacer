@@ -26,9 +26,14 @@ from pacer.domain import (
     TalkStatus,
     Trainee,
     TraineeNote,
+    present,
 )
-from pacer.domain.talk import NOTE_MAX_LENGTH, REASON_MAX_LENGTH, TALK_PROPOSAL_TRANSITIONS
 from pacer.domain.state import require_transition
+from pacer.domain.talk import (
+    NOTE_MAX_LENGTH,
+    REASON_MAX_LENGTH,
+    TALK_PROPOSAL_TRANSITIONS,
+)
 from pacer.repositories.interfaces import (
     GoalRepo,
     GroupRepo,
@@ -40,7 +45,8 @@ from pacer.repositories.interfaces import (
 
 from .errors import RuleViolationError, found
 from .goals import GoalService
-from .permissions import can_edit_goals, can_view_trainee, require
+from .permissions import can_edit_goals, require
+from .visibility import visible_trainee
 
 log = logging.getLogger(__name__)
 
@@ -87,7 +93,7 @@ class TalkService:
     # --- talks ----------------------------------------------------------------------------------
 
     def record_talk(self, actor: StaffMember, trainee_id: int, *, held_on: date, notes: str) -> PersonalTalk:
-        trainee = self._open_trainee(trainee_id)
+        trainee = self._open_trainee(actor, trainee_id)
         require(can_edit_goals(actor, trainee), "record talks with this trainee")
         talk = self._talks.add(
             PersonalTalk(trainee_id=trainee_id, counselor_id=actor.id, held_on=held_on, notes=notes)
@@ -97,17 +103,17 @@ class TalkService:
 
     def get_talk(self, actor: StaffMember, talk_id: int) -> PersonalTalk:
         talk = found(self._talks.get(talk_id), "Talk", talk_id)
-        self._require_can_view(actor, talk.trainee_id)
+        self._visible(actor, talk.trainee_id, what="Talk", object_id=talk_id)
         return talk
 
     def list_talks(self, actor: StaffMember, trainee_id: int) -> list[PersonalTalk]:
-        self._require_can_view(actor, trainee_id)
+        self._visible(actor, trainee_id)
         return self._talks.list_by_trainee(trainee_id)
 
     def talk_to_summarize(self, actor: StaffMember, talk_id: int) -> tuple[PersonalTalk, Trainee]:
         """The talk and its trainee, if this actor may run the summary on it (the pipeline asks)."""
         talk = found(self._talks.get(talk_id), "Talk", talk_id)
-        trainee = self._open_trainee(talk.trainee_id)
+        trainee = self._open_trainee(actor, talk.trainee_id, what="Talk", object_id=talk_id)
         require(can_edit_goals(actor, trainee), "summarize talks with this trainee")
         return talk, trainee
 
@@ -135,45 +141,49 @@ class TalkService:
             proposal = proposal.edited(**edits.model_dump(exclude_unset=True))
 
         if proposal.kind is TalkProposalKind.PROGRESS:
-            goal = found(self._goals.get(proposal.goal_id), "Goal", proposal.goal_id)
+            goal_id = present(proposal.goal_id, "a goal on a progress proposal")
+            goal = found(self._goals.get(goal_id), "Goal", goal_id)
             if goal.trainee_id != talk.trainee_id:  # checked by the pipeline too; never trust one check
                 raise RuleViolationError(f"Goal {goal.id} is not a goal of this talk's trainee")
-            update = self._goal_service.record_progress(actor, goal.id, proposal.progress, proposal.text)
-            approved = proposal.approve(actor.id, goal_update_id=update.id)
+            progress = present(proposal.progress, "a progress value on a progress proposal")
+            text = present(proposal.text, "the text of an open proposal")
+            update = self._goal_service.record_progress(actor, goal.key, progress, text)
+            approved = proposal.approve(actor.key, goal_update_id=update.key)
         else:
-            if len(proposal.text) > NOTE_MAX_LENGTH:
+            text = present(proposal.text, "the text of an open proposal")
+            if len(text) > NOTE_MAX_LENGTH:
                 raise RuleViolationError(f"A note is at most {NOTE_MAX_LENGTH} characters; shorten it first")
             note = self._notes.add(
                 TraineeNote(
                     trainee_id=talk.trainee_id,
-                    kind=proposal.note_kind,
-                    text=proposal.text,
-                    author_id=actor.id,  # the counselor who approved it owns it, not the model
-                    source_talk_id=talk.id,
+                    kind=present(proposal.note_kind, "a note kind on a note proposal"),
+                    text=text,
+                    author_id=actor.key,  # the counselor who approved it owns it, not the model
+                    source_talk_id=talk.key,
                 )
             )
-            approved = proposal.approve(actor.id, note_id=note.id)
+            approved = proposal.approve(actor.key, note_id=note.key)
 
         self._proposals.update(approved)
         log.info("Talk proposal %s (%s) approved by staff %s", proposal_id, proposal.kind, actor.id)
-        self._close_if_done(talk.id)
+        self._close_if_done(talk.key)
         return approved
 
     def reject_proposal(self, actor: StaffMember, proposal_id: int) -> TalkProposal:
         proposal, talk = self._decidable(actor, proposal_id)
-        rejected = self._proposals.update(proposal.reject(actor.id))  # its text is not kept
+        rejected = self._proposals.update(proposal.reject(actor.key))  # its text is not kept
         log.info("Talk proposal %s rejected by staff %s", proposal_id, actor.id)
-        self._close_if_done(talk.id)
+        self._close_if_done(talk.key)
         return rejected
 
     # --- notes: the trainee's long-term memory ------------------------------------------------------
 
     def list_notes(self, actor: StaffMember, trainee_id: int) -> list[TraineeNote]:
-        self._require_can_view(actor, trainee_id)
+        self._visible(actor, trainee_id)
         return self._notes.list_by_trainee(trainee_id)
 
     def add_note(self, actor: StaffMember, trainee_id: int, *, kind: NoteKind, text: str) -> TraineeNote:
-        trainee = self._open_trainee(trainee_id)
+        trainee = self._open_trainee(actor, trainee_id)
         require(can_edit_goals(actor, trainee), "add notes about this trainee")
         note = self._notes.add(TraineeNote(trainee_id=trainee_id, kind=kind, text=text, author_id=actor.id))
         log.info("Note %s added for trainee %s by staff %s", note.id, trainee_id, actor.id)
@@ -182,7 +192,7 @@ class TalkService:
     def delete_note(self, actor: StaffMember, note_id: int) -> None:
         """Allowed even when the trainee's file is closed: removing personal data is always allowed."""
         note = found(self._notes.get(note_id), "Note", note_id)
-        trainee = found(self._trainees.get(note.trainee_id), "Trainee", note.trainee_id)
+        trainee = self._visible(actor, note.trainee_id, what="Note", object_id=note_id)
         require(can_edit_goals(actor, trainee), "delete notes about this trainee")
         self._notes.delete(note_id)
         log.info("Note %s about trainee %s deleted by staff %s", note_id, trainee.id, actor.id)
@@ -198,27 +208,31 @@ class TalkService:
         """
         proposal = found(self._proposals.get(proposal_id), "Talk proposal", proposal_id)
         talk = found(self._talks.get(proposal.talk_id), "Talk", proposal.talk_id)
-        trainee = self._open_trainee(talk.trainee_id)
+        trainee = self._open_trainee(actor, talk.trainee_id, what="Talk proposal", object_id=proposal_id)
         require(can_edit_goals(actor, trainee), "decide on proposals about this trainee")
-        talk = self._talks.lock(talk.id)
-        proposal = self._proposals.lock(proposal_id)  # re-read now that no one else can decide
+        talk = found(self._talks.lock(talk.key), "Talk", talk.key)
+        # re-read now that no one else can decide
+        proposal = found(self._proposals.lock(proposal_id), "Talk proposal", proposal_id)
         # Still open? Checked BEFORE anything is created.
         require_transition(TALK_PROPOSAL_TRANSITIONS, proposal.status, ProposalStatus.APPROVED, "proposal")
         return proposal, talk
 
     def _close_if_done(self, talk_id: int) -> None:
-        talk = self._talks.get(talk_id)
+        talk = found(self._talks.get(talk_id), "Talk", talk_id)
         if talk.status is TalkStatus.SUMMARIZED and self._proposals.count_open(talk_id) == 0:
             self._talks.update(talk.advance(TalkStatus.REVIEWED))
             log.info("Talk %s: every proposal decided", talk_id)
 
-    def _open_trainee(self, trainee_id: int) -> Trainee:
-        trainee = found(self._trainees.get(trainee_id), "Trainee", trainee_id)
+    def _visible(
+        self, actor: StaffMember, trainee_id: int, *, what: str = "Trainee", object_id: int | None = None
+    ) -> Trainee:
+        return visible_trainee(actor, self._trainees, self._groups, trainee_id, what=what, object_id=object_id)
+
+    def _open_trainee(
+        self, actor: StaffMember, trainee_id: int, *, what: str = "Trainee", object_id: int | None = None
+    ) -> Trainee:
+        """Visible (else 404) and open (else 409), in that order: see services/visibility.py."""
+        trainee = self._visible(actor, trainee_id, what=what, object_id=object_id)
         if trainee.is_closed:
             raise RuleViolationError(f"Trainee {trainee_id} is {trainee.status}; the file is closed")
         return trainee
-
-    def _require_can_view(self, actor: StaffMember, trainee_id: int) -> None:
-        trainee = found(self._trainees.get(trainee_id), "Trainee", trainee_id)
-        group = found(self._groups.get(trainee.group_id), "Group", trainee.group_id)
-        require(can_view_trainee(actor, group), "view this trainee's talks and notes")

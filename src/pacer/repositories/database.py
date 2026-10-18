@@ -43,6 +43,5 @@ def unit_of_work(engine: Engine | None = None) -> Iterator[Session]:
             goals = GoalRepository(session)
             ...  # every change here is saved together, or not at all
     """
-    with Session(engine or get_engine(), expire_on_commit=False) as session:
-        with session.begin():
-            yield session
+    with Session(engine or get_engine(), expire_on_commit=False) as session, session.begin():
+        yield session

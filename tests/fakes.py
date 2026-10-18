@@ -92,6 +92,9 @@ class FakeTraineeRepo(_Store[Trainee]):
     def list_by_counselor(self, counselor_id: int) -> list[Trainee]:
         return self.where(primary_counselor_id=counselor_id)
 
+    def lock(self, trainee_id: int) -> Trainee | None:
+        return self.get(trainee_id)
+
 
 class FakePersonalFileRepo(_Store[PersonalFile]):
     def get_by_trainee(self, trainee_id: int) -> PersonalFile | None:
@@ -152,8 +155,18 @@ class FakeTaskRepo(_Store[Task]):
 
 
 class FakeTalkRepo(_Store[PersonalTalk]):
+    def __init__(self, proposals: "FakeTalkProposalRepo | None" = None) -> None:
+        super().__init__()
+        self._proposals = proposals
+
     def lock(self, talk_id: int) -> PersonalTalk | None:
         return self.get(talk_id)
+
+    def delete_with_proposals(self, talk_id: int) -> None:
+        if self._proposals is not None:
+            for proposal in self._proposals.where(talk_id=talk_id):
+                self._proposals.rows.pop(proposal.key, None)
+        self.rows.pop(talk_id, None)
 
     def list_by_trainee(self, trainee_id: int) -> list[PersonalTalk]:
         return sorted(self.where(trainee_id=trainee_id), key=lambda t: (t.held_on, t.id), reverse=True)
@@ -229,7 +242,7 @@ def empty_repos() -> Repos:
         meetings=FakeMeetingRepo(),
         proposals=FakeProposedTaskRepo(),
         tasks=FakeTaskRepo(),
-        talks=FakeTalkRepo(),
+        talks=FakeTalkRepo(talk_proposals),
         talk_proposals=talk_proposals,
         notes=FakeTraineeNoteRepo(talk_proposals),
     )
@@ -263,6 +276,7 @@ class World:
 
     def __post_init__(self) -> None:
         self.notes = FakeTraineeNoteRepo(self.talk_proposals)
+        self.talks = FakeTalkRepo(self.talk_proposals)
         self.uow = FakeUnitOfWork(self.repos)
         self.manager = self.staff.add(StaffMember(full_name="Ronit Manager", role=StaffRole.MANAGER))
         self.noa = self.staff.add(StaffMember(full_name="Noa Levi", role=StaffRole.COUNSELOR))

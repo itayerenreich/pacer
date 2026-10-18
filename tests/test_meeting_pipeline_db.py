@@ -8,6 +8,7 @@ The fake tests prove the logic. These prove what only a database can show:
 * the summary and the proposals are committed together, or not at all.
 """
 
+import contextlib
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -153,7 +154,7 @@ def test_two_meetings_at_once_are_processed_in_parallel_and_kept_apart(academy):
 
     def model(message: str) -> str:
         both_in_the_model.wait()
-        return short_answer if "[NAME_1]" in message else GOOD
+        return short_answer if "שקי שינה" in message else GOOD  # a phrase only SHORT has
 
     def run(meeting_id: int):
         cloud = FakeLLMClient(answers=model, runs_locally=False)
@@ -247,10 +248,9 @@ def test_deciding_the_last_two_proposals_at_once_still_closes_the_meeting(academ
     real_count = ProposedTaskRepository.count_open
 
     def count_together(self, meeting_id):
-        try:
+        # the other request is waiting for the lock: it cannot be here, so the barrier breaks
+        with contextlib.suppress(threading.BrokenBarrierError):
             before_counting.wait()
-        except threading.BrokenBarrierError:
-            pass  # the other request is waiting for the lock: it cannot be here
         return real_count(self, meeting_id)
 
     monkeypatch.setattr(ProposedTaskRepository, "count_open", count_together)

@@ -73,8 +73,12 @@ class StructuredResult[T: BaseModel]:
 
     @property
     def cost_usd(self) -> float | None:
-        costs = [r.cost_usd for r in self.responses]
-        return None if any(c is None for c in costs) else sum(costs)
+        total = 0.0
+        for response in self.responses:
+            if response.cost_usd is None:
+                return None  # one unknown cost makes the total unknown, never an undercount
+            total += response.cost_usd
+        return total
 
     @property
     def prompt_ref(self) -> str:

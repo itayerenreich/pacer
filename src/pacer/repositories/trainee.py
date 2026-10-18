@@ -32,6 +32,11 @@ class TraineeRepository:
         self._session.flush()
         return trainee
 
+    def lock(self, trainee_id: int) -> Trainee | None:
+        """SELECT ... FOR UPDATE: the row stays locked until the unit of work ends."""
+        row = self._session.get(TraineeRow, trainee_id, with_for_update=True, populate_existing=True)
+        return None if row is None else _to_domain(row)
+
     def list_all(self) -> list[Trainee]:
         rows = self._session.scalars(select(TraineeRow).order_by(TraineeRow.id))
         return [_to_domain(row) for row in rows]

@@ -21,8 +21,9 @@ Three rules shape this module:
    more before it leaves this computer.
 3. The model proposes, code checks, a person decides. The answer is validated for SHAPE
    (complete_structured, Pydantic) and for CONTENT here (validate_extraction: is the owner a
-   participant? is the date sensible? a duplicate?). What content validation cannot fix is
-   cleared and reported as an issue, never guessed. Then the manager approves each proposal.
+   staff member the text names? is the date sensible? a duplicate?). What content validation
+   cannot fix is cleared and reported as an issue, never guessed. Then the manager approves each
+   proposal.
 """
 
 import logging
@@ -33,10 +34,11 @@ from datetime import date, timedelta
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from pacer.domain import MeetingStatus, ProposedTask, StaffMeeting, StaffMember, StaffRole
+from pacer.domain import MeetingStatus, ProposedTask, StaffMeeting, StaffMember, StaffRole, present
 from pacer.domain.meeting import DESCRIPTION_MAX_LENGTH, TRANSCRIPT_MIN_LENGTH
 from pacer.repositories import Repos, UnitOfWork
 from pacer.services import MeetingService, RuleViolationError, TaskDraft
+from pacer.services.errors import found
 
 from .anonymization import (
     AnonymizationError,
@@ -51,6 +53,7 @@ from .anonymization import (
 from .issues import Issue, IssueCode
 from .prompts import Prompt, load_prompt
 from .routing import AITask, PrivacyViolation, Router
+from .sensitive import remove_sensitive_sentences
 from .structured import complete_structured
 from .transcription import RecordingStore, Transcriber
 
@@ -146,7 +149,7 @@ def validate_extraction(
     drafts: list[TaskDraft] = []
     seen: set[tuple[str, int | None]] = set()
     for number, task in enumerate(extraction.tasks, start=1):
-        owner_id = _owner_id(task.owner, participants, number, issues)
+        owner_id = _owner_id(task.owner, source, participants, number, issues)
         due_date = _due_date(task.due_date, held_on, number, issues)
 
         unknown_tokens(task.description, number)
@@ -165,7 +168,13 @@ def validate_extraction(
     return ValidatedExtraction(summary=summary, drafts=drafts, issues=issues)
 
 
-def _owner_id(owner: str | None, participants: set[int], task: int, issues: list[Issue]) -> int | None:
+def _owner_id(
+    owner: str | None, source: AnonymizedText, participants: set[int], task: int, issues: list[Issue]
+) -> int | None:
+    """Who owns a task. A participant is fine. A staff member who was not there but is NAMED in
+    the text stays the owner, flagged: managers give tasks to absent counselors all the time
+    (decision 2026-10-15, found by a live test). A staff token that is not in the text is
+    invented, even if a staff member with that id happens to exist: the model saw only the text."""
     if owner is None:
         return None
     owner = owner.strip()
@@ -173,13 +182,17 @@ def _owner_id(owner: str | None, participants: set[int], task: int, issues: list
         staff_id = int(match.group(1))
         if staff_id in participants:
             return staff_id
-        issues.append(Issue(IssueCode.OWNER_NOT_PARTICIPANT, task, f"{owner} did not attend; owner cleared"))
+        person = source.person_for(owner)
+        if person is not None and person.kind is PersonKind.STAFF:
+            issues.append(Issue(IssueCode.OWNER_ABSENT, task, f"{owner} was not at the meeting; kept, please check"))
+            return staff_id
+        issues.append(Issue(IssueCode.OWNER_UNKNOWN, task, f"{owner} is not in the text; owner cleared"))
     elif _TRAINEE_TOKEN.match(owner):
         issues.append(Issue(IssueCode.OWNER_NOT_STAFF, task, f"{owner} is a trainee; owner cleared"))
     elif _NAME_TOKEN.match(owner):
         issues.append(Issue(IssueCode.OWNER_AMBIGUOUS, task, f"{owner} fits more than one person; owner cleared"))
     else:
-        issues.append(Issue(IssueCode.OWNER_INVALID, task, "the owner was not a participant token; owner cleared"))
+        issues.append(Issue(IssueCode.OWNER_INVALID, task, "the owner was not a staff token; owner cleared"))
     return None
 
 
@@ -206,6 +219,7 @@ class ExtractionResult:
     prompt_ref: str
     attempts: int
     cost_usd: float | None
+    removed_sentences: int = 0  # about health, removed before sending; the transcript keeps them
 
 
 class MeetingPipeline:
@@ -230,7 +244,7 @@ class MeetingPipeline:
         self._router = router
         self._transcriber = transcriber
         self._recordings = recordings
-        self._prompt = prompt or load_prompt("meeting_extract", 1)  # a pinned version, not "latest"
+        self._prompt = prompt or load_prompt("meeting_extract", 3)  # a pinned version, not "latest"
 
     def process(self, actor: StaffMember, meeting_id: int) -> ExtractionResult:
         """Run every stage that has not run yet, continuing from where the meeting is."""
@@ -291,7 +305,10 @@ class MeetingPipeline:
         with self._uow() as repos:
             self._service(repos).get_meeting(actor, meeting_id)  # permission
             meeting = _require_status(repos.meetings.lock(meeting_id), M.TRANSCRIBED)
-            safe = Anonymizer(load_roster(repos.staff, repos.trainees)).anonymize(meeting.transcript)
+            participants = [s for i in meeting.participant_ids if (s := repos.staff.get(i)) is not None]
+            # The same function as the extract stage: the saved text is exactly what will be sent.
+            transcript = present(meeting.transcript, "the transcript of a transcribed meeting")
+            safe, _ = anonymize_meeting(load_roster(repos.staff, repos.trainees), transcript, participants)
             anonymized = repos.meetings.update(meeting.advance(M.ANONYMIZED, anonymized_transcript=safe.text))
         if self._recordings is not None:
             self._recordings.delete(meeting_id)  # a recording never outlives its transcript, even after a crash
@@ -318,7 +335,7 @@ class MeetingPipeline:
         # 2. Anonymize again, from the transcript. The token -> person mapping is needed to read the
         #    answer, and it is never stored. Same roster -> same text as the ANONYMIZED stage; if a
         #    person was added since, the new text is safer, and it is the one saved below.
-        safe = anonymize_meeting(roster, meeting.transcript, participants)
+        safe, removed = anonymize_meeting(roster, present(meeting.transcript, "the transcript"), participants)
         message = extraction_message(safe, meeting.held_on, participants)
         if Anonymizer(roster).contains_known_name(message):  # defense in depth, right before sending
             raise AnonymizationError(f"Meeting {meeting_id}: a known name is in the message; nothing was sent")
@@ -342,7 +359,7 @@ class MeetingPipeline:
                 current.advance(M.EXTRACTED, anonymized_transcript=safe.text, summary=validated.summary)
             )
             proposals = self._service(repos).submit_proposals(meeting_id, validated.drafts)
-            final = repos.meetings.get(meeting_id)
+            final = found(repos.meetings.get(meeting_id), "Meeting", meeting_id)
 
         log.info(
             "Meeting %s extracted: prompt=%s attempts=%s proposals=%s issues=%s cost=%s",
@@ -360,6 +377,7 @@ class MeetingPipeline:
             prompt_ref=result.prompt_ref,
             attempts=result.attempts,
             cost_usd=result.cost_usd,
+            removed_sentences=removed,
         )
 
     # --- helpers -------------------------------------------------------------------------------
@@ -393,7 +411,15 @@ def _require_status(meeting: StaffMeeting | None, status: MeetingStatus) -> Staf
     return meeting
 
 
-def anonymize_meeting(roster: Roster, transcript: str, participants: Sequence[StaffMember]) -> AnonymizedText:
-    """The transcript with names replaced, and the participants known by token even if never named."""
-    known = [roster.find(PersonKind.STAFF, s.id) for s in participants]
-    return Anonymizer(roster).anonymize(transcript, known=[p for p in known if p is not None])
+def anonymize_meeting(
+    roster: Roster, transcript: str, participants: Sequence[StaffMember]
+) -> tuple[AnonymizedText, int]:
+    """The transcript with names replaced, and the participants known by token even if never named.
+    The participants are also the context for names that are common words: in a meeting the only
+    גל in the academy attends, "גל" alone is him.
+    Sentences about health are removed first, as in personal talks (decision 2026-10-18); the
+    second value is how many. The raw transcript keeps them, in the local database.
+    """
+    kept, removed = remove_sensitive_sentences(transcript)
+    known = [roster.find(PersonKind.STAFF, s.key) for s in participants]
+    return Anonymizer(roster).anonymize(kept, known=[p for p in known if p is not None]), removed

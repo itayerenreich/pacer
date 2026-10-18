@@ -4,7 +4,7 @@ A client creating a goal sends a title and a category. It does not choose the id
 created_at, status or progress, and the trainee comes from the URL. So each body
 here is a separate small model, and the endpoint builds the domain object from it.
 
-The field rules are not written twice: `Goal.model_fields["title"]` reuses the
+The field rules are not written twice: `Annotated[str, Goal.model_fields["title"]]` reuses the
 domain's own rule (3-200 characters), so /docs shows it and it can never drift.
 Responses are the domain models themselves (Trainee, Goal, ...), since everything
 in them may be shown to a staff member who passed the permission check. The few
@@ -40,15 +40,15 @@ class _Body(BaseModel):
 
 
 class TraineeCreate(_Body):
-    first_name: str = Trainee.model_fields["first_name"]
-    last_name: str = Trainee.model_fields["last_name"]
+    first_name: Annotated[str, Trainee.model_fields["first_name"]]
+    last_name: Annotated[str, Trainee.model_fields["last_name"]]
     cohort_id: int
     group_id: int
     primary_counselor_id: int
 
 
 class GoalCreate(_Body):
-    title: str = Goal.model_fields["title"]
+    title: Annotated[str, Goal.model_fields["title"]]
     description: str | None = None
     category: GoalCategory
     target_date: date | None = None
@@ -68,18 +68,18 @@ class StatusChange(_Body):
 class ApprovalCreate(_Body):
     kind: ApprovalKind
     trainee_id: int
-    reason: str = ApprovalRequest.model_fields["reason"]
+    reason: Annotated[str, ApprovalRequest.model_fields["reason"]]
     requested_status: TraineeStatus | None = Field(
         default=None, description="Required for kind=status_change, otherwise leave empty"
     )
 
 
 class Decision(_Body):
-    note: str | None = ApprovalRequest.model_fields["decision_note"]
+    note: Annotated[str | None, ApprovalRequest.model_fields["decision_note"]]
 
 
 class MeetingCreate(_Body):
-    title: str = StaffMeeting.model_fields["title"]
+    title: Annotated[str, StaffMeeting.model_fields["title"]]
     held_on: date
     participant_ids: list[int] = Field(min_length=1, description="Staff members who took part")
     transcript: str | None = Field(
@@ -101,7 +101,7 @@ class TalkCreate(_Body):
 
 class NoteCreate(_Body):
     kind: NoteKind
-    text: str = TraineeNote.model_fields["text"]
+    text: Annotated[str, TraineeNote.model_fields["text"]]
 
 
 # --- responses ------------------------------------------------------------------------------
@@ -125,9 +125,12 @@ class ProcessResult(BaseModel):
     meeting: StaffMeeting
     proposals: list[ProposedTask]
     issues: list[IssueOut] = Field(description="What validation corrected in the model's answer. Check these")
-    prompt: str = Field(description="The exact prompt version used, e.g. meeting_extract@v1")
+    prompt: str = Field(description="The exact prompt version used, e.g. meeting_extract@v3")
     attempts: int = Field(description="1, or 2 if the model had to correct its first answer")
     cost_usd: float | None
+    removed_sentences: int = Field(
+        description="Sentences about health that were removed before sending; the transcript still has them"
+    )
 
     @classmethod
     def of(cls, result: ExtractionResult) -> "ProcessResult":
@@ -138,6 +141,7 @@ class ProcessResult(BaseModel):
             prompt=result.prompt_ref,
             attempts=result.attempts,
             cost_usd=result.cost_usd,
+            removed_sentences=result.removed_sentences,
         )
 
 
@@ -155,6 +159,9 @@ class SummarizeResult(BaseModel):
     prompt: str
     attempts: int
     cost_usd: float | None
+    removed_sentences: int = Field(
+        description="Sentences about health that were removed before sending; your notes still have them"
+    )
 
     @classmethod
     def of(cls, result: TalkResult) -> "SummarizeResult":
@@ -165,4 +172,5 @@ class SummarizeResult(BaseModel):
             prompt=result.prompt_ref,
             attempts=result.attempts,
             cost_usd=result.cost_usd,
+            removed_sentences=result.removed_sentences,
         )

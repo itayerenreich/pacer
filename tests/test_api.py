@@ -186,8 +186,11 @@ def test_enroll_with_counselor_outside_the_group_409(client, world):
     assert client.post("/trainees", json=body, headers=as_(world.manager)).status_code == 409
 
 
-def test_counselor_of_another_group_cannot_see_the_trainee_403(client, world):
-    assert client.get(f"/trainees/{world.yael.id}", headers=as_(world.dana)).status_code == 403
+def test_counselor_of_another_group_gets_404_as_if_the_trainee_did_not_exist(client, world):
+    hidden = client.get(f"/trainees/{world.yael.id}", headers=as_(world.dana))
+    missing = client.get("/trainees/999", headers=as_(world.dana))
+    assert hidden.status_code == missing.status_code == 404
+    assert hidden.json()["detail"] == f"Trainee {world.yael.id} does not exist"  # same words: nothing to learn
 
 
 def test_manager_changes_status(client, world):
@@ -294,3 +297,10 @@ def test_docs_page_and_schema_are_served(client):
     paths = client.get("/openapi.json").json()["paths"]
     assert "/goals/{goal_id}/progress" in paths
     assert paths["/goals/{goal_id}/progress"]["post"]["requestBody"]
+
+
+def test_list_trainees_shows_only_what_the_actor_may_see(client, world):
+    assert [t["id"] for t in client.get("/trainees", headers=as_(world.manager)).json()] == [world.yael.id]
+    assert client.get("/trainees", headers=as_(world.dana)).json() == []
+    assert client.get("/trainees?status=left", headers=as_(world.manager)).json() == []
+    assert client.get("/trainees?status=nonsense", headers=as_(world.manager)).status_code == 422

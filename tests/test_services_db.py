@@ -118,10 +118,9 @@ def test_approval_and_status_change_roll_back_together(engine, academy):
             noa, ApprovalKind.STATUS_CHANGE, trainee.id, "Wants to leave", requested_status="left"
         )
 
-    with pytest.raises(RuntimeError):
-        with unit_of_work(engine) as session:
-            approval_service(session).approve(manager, request.id)
-            raise RuntimeError("e.g. the notification step failed")
+    with pytest.raises(RuntimeError), unit_of_work(engine) as session:
+        approval_service(session).approve(manager, request.id)
+        raise RuntimeError("e.g. the notification step failed")
 
     with unit_of_work(engine) as session:
         assert ApprovalRequestRepository(session).get(request.id).status is ApprovalStatus.PENDING
