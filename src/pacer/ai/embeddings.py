@@ -53,13 +53,15 @@ class EmbeddingSpec:
 EMBEDDING_MODELS: dict[str, EmbeddingSpec] = {
     spec.name: spec
     for spec in (
-        # Measured 2026-10-18 (classics, 8 questions): hit@1 7/8 with fixed-200-40. Relevant passages
-        # scored 0.46-0.56; the floor is a first guess, to be calibrated on off-topic questions.
-        EmbeddingSpec(name="bge-m3", litellm_model="ollama/bge-m3", dimensions=1024, min_similarity=0.40),
+        # Measured 2026-10-18 (classics, 8 questions + 3 off-topic): hit@1 7/8 with fixed-200-40. The
+        # lowest right source scored 0.469 (structure-220: 0.452), the highest off-topic hit 0.410 (0.394):
+        # the floor sits in the gap. A narrow gap on a small set: measure again as the library grows.
+        EmbeddingSpec(name="bge-m3", litellm_model="ollama/bge-m3", dimensions=1024, min_similarity=0.44),
         EmbeddingSpec(
             name="qwen3-embedding-0.6b",
             litellm_model="ollama/qwen3-embedding:0.6b",
             dimensions=1024,
+            # No floor: off-topic questions scored as high as right sources (0.424 vs 0.400), nothing separates.
             # Qwen3-Embedding is trained with an instruction before the query, not before passages.
             query_prefix=(
                 "Instruct: Given a question from a counselor at a pre-military academy, "

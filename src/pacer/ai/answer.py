@@ -186,7 +186,7 @@ class LibraryAnswerer:
         self._embedder = embedder
         self._chunking = chunking
         self._k = k
-        self._prompt = prompt or load_prompt("library_answer", 2)  # pinned
+        self._prompt = prompt or load_prompt("library_answer", 3)  # pinned
 
     def prepare(self, question: str) -> tuple[AnonymizedText, list[ScoredChunk]]:
         """Everything before the model: anonymize the question, and retrieve passages for it.
