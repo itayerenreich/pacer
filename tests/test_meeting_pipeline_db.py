@@ -153,7 +153,7 @@ def test_two_meetings_at_once_are_processed_in_parallel_and_kept_apart(academy):
 
     def model(message: str) -> str:
         both_in_the_model.wait()
-        return short_answer if "[NAME_1]" in message else GOOD
+        return short_answer if "שקי שינה" in message else GOOD  # a phrase only SHORT has
 
     def run(meeting_id: int):
         cloud = FakeLLMClient(answers=model, runs_locally=False)

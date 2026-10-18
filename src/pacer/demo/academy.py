@@ -310,10 +310,10 @@ class _Builder:
             )
             summary.approvals.append(request)
             if decided and kind == ApprovalKind.STATUS_CHANGE and status == ApprovalStatus.APPROVED:
-                self._apply_status(summary, trainee, requested)
+                self._apply_status(summary, trainee, requested, at=created + timedelta(hours=20))
 
-    def _apply_status(self, summary: Summary, trainee: Trainee, status: TraineeStatus) -> None:
-        updated = self.r.trainees.update(trainee.with_status(status))
+    def _apply_status(self, summary: Summary, trainee: Trainee, status: TraineeStatus, *, at: datetime) -> None:
+        updated = self.r.trainees.update(trainee.with_status(status, at=at))
         summary.trainees[[t.id for t in summary.trainees].index(trainee.id)] = updated
         if status == TraineeStatus.LEFT:  # unfinished goals of a trainee who left are dropped
             for goal in self.r.goals.list_by_trainee(trainee.id):
