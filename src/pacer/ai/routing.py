@@ -45,6 +45,7 @@ class AITask(StrEnum):
     EXTRACT_MEETING = "extract_meeting"  # task 6: summary + proposed tasks from a staff meeting
     SUMMARIZE_TALK = "summarize_talk"  # task 7: personal talk summary + proposed notes
     SYNTHETIC_DATA = "synthetic_data"  # stage 4: invented transcripts and cases for evaluation
+    ANSWER_FROM_LIBRARY = "answer_from_library"  # stage 4: a staff question, answered from the library
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,8 @@ ROUTES: Mapping[AITask, Route] = MappingProxyType(
         AITask.EXTRACT_MEETING: Route("claude-haiku", Sensitivity.ANONYMIZED, max_tokens=4000),
         AITask.SUMMARIZE_TALK: Route("claude-haiku", Sensitivity.ANONYMIZED, max_tokens=4000),
         AITask.SYNTHETIC_DATA: Route("claude-sonnet", Sensitivity.PUBLIC, max_tokens=8000),
+        # The library is not personal, but a question may name a trainee: it is anonymized first.
+        AITask.ANSWER_FROM_LIBRARY: Route("claude-haiku", Sensitivity.ANONYMIZED, max_tokens=3000),
     }
 )
 

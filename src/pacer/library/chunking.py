@@ -134,4 +134,4 @@ STRATEGIES: dict[str, Strategy] = {
     "fixed-200-40": lambda units: fixed(units, size=200, overlap=40),
     "structure-220": lambda units: structure(units, max_words=220),
 }
-DEFAULT_CHUNKING = "structure-220"
+DEFAULT_CHUNKING = "fixed-200-40"  # chosen by measurement, 2026-10-18 (stage 4 doc, part 11); revisit with more texts

@@ -63,6 +63,43 @@ def index_library(uow: UnitOfWork, embedder: Embedder, chunking: str, *, batch_s
     return report
 
 
+def retrieve(
+    uow: UnitOfWork,
+    embedder: Embedder,
+    chunking: str,
+    question: str,
+    *,
+    k: int = 5,
+    max_per_source: int = 2,
+    min_similarity: float | None = None,
+    for_cloud_model: bool = False,
+) -> list[ScoredChunk]:
+    """The passages an answer is built from: search, then three rules on top of it.
+
+    * A floor (min_similarity): below it a chunk is not relevant, only "the least far". With no
+      passage above the floor there is no answer, and no model is asked (see ai/answer.py).
+    * At most max_per_source chunks of one source. A long, general source (an essay on education
+      as a whole) is close to almost every question and would otherwise fill all k places; this is
+      called "hubness" (seen in our first measurement, 2026-10-18).
+    * Among chunks that are about equally close (within 0.02), the one from stronger evidence first.
+    """
+    floor = embedder.spec.min_similarity if min_similarity is None else min_similarity
+    candidates = search_library(uow, embedder, chunking, question, k=k * 4, for_cloud_model=for_cloud_model)
+    relevant = [hit for hit in candidates if floor is None or hit.similarity >= floor]
+    # Stable sort by (similarity rounded to a 0.02 step, evidence rank): close calls go to stronger evidence.
+    relevant.sort(key=lambda h: (-round(h.similarity / 0.02), -h.source.evidence_level.rank))
+    picked: list[ScoredChunk] = []
+    per_source: dict[int, int] = {}
+    for hit in relevant:
+        if per_source.get(hit.source.key, 0) >= max_per_source:
+            continue
+        picked.append(hit)
+        per_source[hit.source.key] = per_source.get(hit.source.key, 0) + 1
+        if len(picked) == k:
+            break
+    return picked
+
+
 def search_library(
     uow: UnitOfWork,
     embedder: Embedder,

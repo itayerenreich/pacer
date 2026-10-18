@@ -194,3 +194,44 @@ def test_a_real_embedding_model_works_on_hebrew(name):
     assert len(same) == EMBEDDING_MODELS[name].dimensions
     assert cosine(same, embedder.embed_documents(["חניך שיושב לבד בארוחות ולא מדבר עם הקבוצה"])[0]) > 0.999
     assert cosine(same, reworded) > cosine(same, unrelated)
+
+
+# --- answering from the library, with bge-m3 and Claude (stage 4, task 6) ----------------------------
+
+
+def test_claude_answers_from_the_library_and_says_so_when_it_cannot():
+    """Needs ANTHROPIC_API_KEY and `ollama pull bge-m3`. Two Rambam passages, embedded for real."""
+    from fakes import FakeUnitOfWork, empty_repos
+
+    from pacer.ai.answer import LibraryAnswerer
+    from pacer.ai.embeddings import ollama_embedder
+    from pacer.ai.library import index_library
+    from pacer.ai.routing import get_router
+    from pacer.domain import Chunk, EvidenceLevel, KnowledgeSource, SourceKind, SourceLicense
+
+    repos = empty_repos()
+    uow = FakeUnitOfWork(repos)
+    with uow() as r:
+        source = r.sources.add(
+            KnowledgeSource(title="משנה תורה, הלכות תלמוד תורה פרק ב'", author='רמב"ם', kind=SourceKind.CLASSIC,
+                            evidence_level=EvidenceLevel.TRADITION, license=SourceLicense.PUBLIC_DOMAIN)
+        )
+        r.chunks.add_many([
+            Chunk(source_id=source.key, chunking="fixed-200-40", ordinal=0, section="הלכה ה",
+                  text="עשרים וחמשה תינוקות למלמד אחד. היו יתר על עשרים וחמשה עד ארבעים, מושיבין עמו אחר לסייעו בלימודן."),
+            Chunk(source_id=source.key, chunking="fixed-200-40", ordinal=1, section="הלכה ב",
+                  text="מכניסין את התינוקות להתלמד כבן שש כבן שבע, לפי כח הבן ובנין גופו."),
+        ])
+    embedder = ollama_embedder("bge-m3")
+    index_library(uow, embedder, "fixed-200-40")
+    answerer = LibraryAnswerer(uow, get_router(), embedder, "fixed-200-40")
+
+    result = answerer.ask("כמה חניכים יכול מדריך אחד ללוות, ומתי צריך עוד איש צוות?")
+    assert not result.insufficient and result.issues == [], result.issues
+    assert any(c.passage == "P1" and c.cited and c.section == "הלכה ה" for c in result.citations) or any(
+        c.cited and c.section == "הלכה ה" for c in result.citations
+    )
+    assert HEBREW.search(result.answer)
+
+    off_topic = answerer.ask("איך ממלאים טופס בקשה לדחיית שירות בצה\"ל?")
+    assert off_topic.insufficient  # no source: either nothing passed the floor, or Claude said so

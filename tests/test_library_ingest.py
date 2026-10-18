@@ -176,7 +176,7 @@ def test_the_repo_manifest_for_the_classics_is_valid():
     m = Manifest.model_validate(data)
     assert len(m.sources) == 5 and all(s.evidence_level is EvidenceLevel.TRADITION for s in m.sources)
     questions = json.loads(Path("library/questions-classics.json").read_text(encoding="utf-8"))["questions"]
-    assert {q["expected"] for q in questions} <= {s.title for s in m.sources}  # every answer is a real source
+    assert {e for q in questions for e in q["expected"]} <= {s.title for s in m.sources}  # every answer is a real source
 
 
 # --- import, index, search ----------------------------------------------------------------------------
@@ -225,6 +225,6 @@ def test_import_index_and_compare_against_postgresql(sample, engine, monkeypatch
     import_file(uow, sample, manifest())
     index_library(uow, FakeEmbedder("bge-m3"), "structure-220")
     questions = tmp_path / "q.json"
-    questions.write_text(json.dumps({"questions": [{"question": "כמה תינוקות למלמד אחד?", "expected": "הלכות תלמוד תורה פרק ב'"}]}, ensure_ascii=False), encoding="utf-8")
+    questions.write_text(json.dumps({"questions": [{"question": "כמה תינוקות למלמד אחד?", "expected": ["הלכות תלמוד תורה פרק ב'"]}]}, ensure_ascii=False), encoding="utf-8")
     report = cli.compare(questions, ["bge-m3"], ["structure-220"])
     assert "| bge-m3 | structure-220 | 1/1 | 1/1 | 1.00 |" in report

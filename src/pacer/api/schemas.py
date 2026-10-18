@@ -16,6 +16,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from pacer.ai.answer import AskResult
 from pacer.ai.issues import Issue, IssueCode
 from pacer.ai.meeting_pipeline import ExtractionResult
 from pacer.ai.talk_pipeline import TalkResult
@@ -117,6 +118,52 @@ class IssueOut(BaseModel):
     @classmethod
     def of(cls, issue: Issue) -> "IssueOut":
         return cls(code=issue.code, item=issue.item, detail=issue.detail, section=issue.section)
+
+
+class LibraryQuestion(_Body):
+    question: str = Field(min_length=5, max_length=1000, examples=["כמה חניכים יכול מדריך אחד ללוות כמו שצריך?"])
+
+
+class CitationOut(BaseModel):
+    passage: str = Field(description="The id the answer cites, e.g. P1")
+    source_id: int
+    source: str = Field(description="The work: title (author, year)")
+    evidence: str = Field(description="What kind of source it is, e.g. 'מחקר' or 'מקור ערכי-מסורתי'")
+    section: str | None = Field(description="Where in the work, e.g. 'הלכה ה'")
+    pages: str | None
+    similarity: float = Field(description="How close the passage is to the question (cosine, 0-1)")
+    cited: bool = Field(description="Whether the answer relied on it")
+
+
+class ClaimOut(BaseModel):
+    text: str
+    passages: list[str]
+
+
+class AskOut(BaseModel):
+    """An answer from the library only, with where each part of it comes from."""
+
+    question: str
+    answer: str
+    insufficient: bool = Field(description="True when the library has no source that answers the question")
+    claims: list[ClaimOut]
+    citations: list[CitationOut]
+    issues: list[IssueOut] = Field(description="What validation found in the model's answer. Check these")
+    prompt: str | None = Field(description="The exact prompt version, or null when no model was asked")
+    cost_usd: float | None
+
+    @classmethod
+    def of(cls, result: AskResult) -> "AskOut":
+        return cls(
+            question=result.question,
+            answer=result.answer,
+            insufficient=result.insufficient,
+            claims=[ClaimOut(text=c.text, passages=c.passages) for c in result.claims],
+            citations=[CitationOut(**vars(c)) for c in result.citations],
+            issues=[IssueOut.of(i) for i in result.issues],
+            prompt=result.prompt_ref,
+            cost_usd=result.cost_usd,
+        )
 
 
 class ProcessResult(BaseModel):

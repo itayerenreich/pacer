@@ -44,13 +44,18 @@ class EmbeddingSpec:
     query_prefix: str = ""
     document_prefix: str = ""
     max_words: int = 2_000  # a chunk longer than this is a bug in the chunking, not something to embed
+    # Below this cosine similarity a chunk is not relevant to a question. Per model (each has its own
+    # scale), calibrated on questions the library cannot answer (python -m pacer.library compare).
+    min_similarity: float | None = None
 
 
 # The candidates. Both are open, multilingual (Hebrew included), and run on a CPU.
 EMBEDDING_MODELS: dict[str, EmbeddingSpec] = {
     spec.name: spec
     for spec in (
-        EmbeddingSpec(name="bge-m3", litellm_model="ollama/bge-m3", dimensions=1024),
+        # Measured 2026-10-18 (classics, 8 questions): hit@1 7/8 with fixed-200-40. Relevant passages
+        # scored 0.46-0.56; the floor is a first guess, to be calibrated on off-topic questions.
+        EmbeddingSpec(name="bge-m3", litellm_model="ollama/bge-m3", dimensions=1024, min_similarity=0.40),
         EmbeddingSpec(
             name="qwen3-embedding-0.6b",
             litellm_model="ollama/qwen3-embedding:0.6b",
@@ -148,7 +153,10 @@ def check_vectors(vectors: list[list[float]], *, expected: int, dimensions: int)
             raise EmbeddingError("A vector of zeros has no direction")
 
 
-def ollama_embedder(name: str = "bge-m3") -> LiteLLMEmbedder:
+DEFAULT_EMBEDDING_MODEL = "bge-m3"  # chosen by measurement, 2026-10-18 (stage 4 doc, part 11)
+
+
+def ollama_embedder(name: str = DEFAULT_EMBEDDING_MODEL) -> LiteLLMEmbedder:
     """One of EMBEDDING_MODELS, served by Ollama on this computer."""
     if name not in EMBEDDING_MODELS:
         raise ValueError(f"Unknown embedding model {name!r}; known: {', '.join(EMBEDDING_MODELS)}")

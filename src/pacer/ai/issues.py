@@ -27,6 +27,10 @@ class IssueCode(StrEnum):
     GOAL_CLOSED = "goal_closed"  # dropped: it takes no more progress
     NO_CHANGE = "no_change"  # the proposed progress is the current progress
     SENSITIVE_TEXT = "sensitive_text"  # health or a diagnosis: never stored as a note or a progress reason
+    # library answers (stage 4)
+    UNKNOWN_PASSAGE = "unknown_passage"  # a cited passage id that was never sent
+    UNSUPPORTED_CLAIM = "unsupported_claim"  # a claim with no passage behind it
+    NO_CITATIONS = "no_citations"  # an answer that cites nothing
 
 
 @dataclass(frozen=True)
