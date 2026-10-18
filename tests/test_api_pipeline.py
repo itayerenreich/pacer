@@ -87,7 +87,7 @@ def test_process_returns_proposals_issues_and_the_prompt_version(client):
     assert [p["owner_id"] for p in body["proposals"]] == [5, 2, 4, 3]
     assert body["proposals"][3]["description"] == "לשוחח עם אדל אזולאי על ריצות הבוקר"
     assert body["issues"] == []
-    assert body["prompt"] == "meeting_extract@v2" and body["attempts"] == 1
+    assert body["prompt"] == "meeting_extract@v3" and body["attempts"] == 1
 
 
 def test_validation_issues_reach_the_manager(client, setup):

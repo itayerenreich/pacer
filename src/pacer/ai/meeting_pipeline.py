@@ -53,6 +53,7 @@ from .anonymization import (
 from .issues import Issue, IssueCode
 from .prompts import Prompt, load_prompt
 from .routing import AITask, PrivacyViolation, Router
+from .sensitive import remove_sensitive_sentences
 from .structured import complete_structured
 from .transcription import RecordingStore, Transcriber
 
@@ -218,6 +219,7 @@ class ExtractionResult:
     prompt_ref: str
     attempts: int
     cost_usd: float | None
+    removed_sentences: int = 0  # about health, removed before sending; the transcript keeps them
 
 
 class MeetingPipeline:
@@ -242,7 +244,7 @@ class MeetingPipeline:
         self._router = router
         self._transcriber = transcriber
         self._recordings = recordings
-        self._prompt = prompt or load_prompt("meeting_extract", 2)  # a pinned version, not "latest"
+        self._prompt = prompt or load_prompt("meeting_extract", 3)  # a pinned version, not "latest"
 
     def process(self, actor: StaffMember, meeting_id: int) -> ExtractionResult:
         """Run every stage that has not run yet, continuing from where the meeting is."""
@@ -306,7 +308,7 @@ class MeetingPipeline:
             participants = [s for i in meeting.participant_ids if (s := repos.staff.get(i)) is not None]
             # The same function as the extract stage: the saved text is exactly what will be sent.
             transcript = present(meeting.transcript, "the transcript of a transcribed meeting")
-            safe = anonymize_meeting(load_roster(repos.staff, repos.trainees), transcript, participants)
+            safe, _ = anonymize_meeting(load_roster(repos.staff, repos.trainees), transcript, participants)
             anonymized = repos.meetings.update(meeting.advance(M.ANONYMIZED, anonymized_transcript=safe.text))
         if self._recordings is not None:
             self._recordings.delete(meeting_id)  # a recording never outlives its transcript, even after a crash
@@ -333,7 +335,7 @@ class MeetingPipeline:
         # 2. Anonymize again, from the transcript. The token -> person mapping is needed to read the
         #    answer, and it is never stored. Same roster -> same text as the ANONYMIZED stage; if a
         #    person was added since, the new text is safer, and it is the one saved below.
-        safe = anonymize_meeting(roster, present(meeting.transcript, "the transcript"), participants)
+        safe, removed = anonymize_meeting(roster, present(meeting.transcript, "the transcript"), participants)
         message = extraction_message(safe, meeting.held_on, participants)
         if Anonymizer(roster).contains_known_name(message):  # defense in depth, right before sending
             raise AnonymizationError(f"Meeting {meeting_id}: a known name is in the message; nothing was sent")
@@ -375,6 +377,7 @@ class MeetingPipeline:
             prompt_ref=result.prompt_ref,
             attempts=result.attempts,
             cost_usd=result.cost_usd,
+            removed_sentences=removed,
         )
 
     # --- helpers -------------------------------------------------------------------------------
@@ -408,9 +411,15 @@ def _require_status(meeting: StaffMeeting | None, status: MeetingStatus) -> Staf
     return meeting
 
 
-def anonymize_meeting(roster: Roster, transcript: str, participants: Sequence[StaffMember]) -> AnonymizedText:
+def anonymize_meeting(
+    roster: Roster, transcript: str, participants: Sequence[StaffMember]
+) -> tuple[AnonymizedText, int]:
     """The transcript with names replaced, and the participants known by token even if never named.
-    The participants are also the context for names that are common words: in a meeting a
-    counselor named שחר attends, "שחר" alone is him."""
+    The participants are also the context for names that are common words: in a meeting the only
+    גל in the academy attends, "גל" alone is him.
+    Sentences about health are removed first, as in personal talks (decision 2026-10-18); the
+    second value is how many. The raw transcript keeps them, in the local database.
+    """
+    kept, removed = remove_sensitive_sentences(transcript)
     known = [roster.find(PersonKind.STAFF, s.key) for s in participants]
-    return Anonymizer(roster).anonymize(transcript, known=[p for p in known if p is not None])
+    return Anonymizer(roster).anonymize(kept, known=[p for p in known if p is not None]), removed

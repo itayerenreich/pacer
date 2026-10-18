@@ -74,7 +74,7 @@ def test_the_counselor_flow_from_notes_to_goal_progress_and_memory(client, repos
     talk_id = record(client)
     result = client.post(f"/talks/{talk_id}/summarize", headers=ITAI).json()
     progress, worked, did_not_work, follow_up = result["proposals"]
-    assert result["issues"] == [] and result["prompt"] == "talk_summary@v1"
+    assert result["issues"] == [] and result["prompt"] == "talk_summary@v2"
 
     edited = client.post(f"/talk-proposals/{progress['id']}/approve", json={"progress": 55}, headers=ITAI)
     client.post(f"/talk-proposals/{worked['id']}/approve", headers=ITAI)

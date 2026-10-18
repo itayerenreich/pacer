@@ -51,6 +51,14 @@ class PersonalTalkRepository:
         return [PersonalTalk.model_validate(row, from_attributes=True) for row in rows]
 
 
+    def delete_with_proposals(self, talk_id: int) -> None:
+        """The talk and every proposal made from it. Notes and progress approved from it stay
+        (they point to it with ON DELETE SET NULL)."""
+        self._session.execute(delete(TalkProposalRow).where(TalkProposalRow.talk_id == talk_id))
+        self._session.execute(delete(PersonalTalkRow).where(PersonalTalkRow.id == talk_id))
+        self._session.flush()
+
+
 class TalkProposalRepository:
     def __init__(self, session: Session) -> None:
         self._session = session

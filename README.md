@@ -43,16 +43,18 @@ Some of the decisions behind it:
   status change applies it in the same transaction.
 - **Privacy by design:** no ID numbers, addresses or medical data; sensitive answers live in a
   separate personal file with stricter access; logs carry ids, never names. Who may not see a
-  record gets 404, exactly as if it did not exist, so ids cannot be probed. Notes about a trainee
-  whose file was closed are deleted after a retention period (`python -m pacer.maintenance`).
+  record gets 404, exactly as if it did not exist, so ids cannot be probed. The notes and personal
+  talks of a trainee whose file was closed are deleted after a retention period
+  (`python -m pacer.maintenance purge-notes`).
 - **Errors stay in their layer:** services raise business errors, and only the API maps them to
   401 / 403 / 404 / 409 / 422 (and 502 / 503 for AI steps, with fixed messages).
 - **Privacy is enforced in code, not in prompts.** Every AI task declares how sensitive its data
   is, and the router refuses to send personal data to a model that does not run locally. Names
   are replaced by tokens (`[TRAINEE_7]`) before any cloud model; the pipeline only accepts an
   `AnonymizedText`, a type that only the anonymizer can create. Hebrew names that are also
-  everyday words ("כבר" is כ + בר) become neutral tokens that turn back into the word. Sentences
-  about health are removed from a counselor's notes before anything is sent. Recordings are
+  everyday words ("כבר" is כ + בר) become neutral tokens that turn back into the word. A second,
+  independent word-by-word check runs before anything is sent. Sentences about health are removed
+  from talk notes and meeting transcripts before anything is sent. Recordings are
   transcribed by a local Whisper model and deleted once the transcript is saved.
 - **No model call inside a database transaction.** A pipeline reads in a short transaction,
   calls the model with none open, then writes in a short one that locks the row and re-checks

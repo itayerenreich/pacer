@@ -21,7 +21,6 @@ The same three rules as the meeting pipeline (see meeting_pipeline.py):
 """
 
 import logging
-import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -57,6 +56,7 @@ from .anonymization import (
 from .issues import Issue, IssueCode
 from .prompts import Prompt, load_prompt
 from .routing import AITask, Router
+from .sensitive import is_sensitive, remove_sensitive_sentences
 from .structured import complete_structured
 
 log = logging.getLogger(__name__)
@@ -98,7 +98,7 @@ def talk_document(
 ) -> str:
     """The full message WITH names. It never leaves this function's caller un-anonymized."""
     goal_lines = [
-        f"- goal_id {g.id}: {g.title} (category: {g.category}, progress: {g.progress}%, status: {g.status})"
+        f"- goal_id {g.id}: {_goal_title(g)} (category: {g.category}, progress: {g.progress}%, status: {g.status})"
         for g in goals
     ] or ["(no goals yet)"]
     return "\n".join(
@@ -113,6 +113,14 @@ def talk_document(
             notes,
         ]
     )
+
+
+WITHHELD_TITLE = "(title withheld)"
+
+
+def _goal_title(goal: Goal) -> str:
+    """A goal title about health is not sent either ("להגיע לכל פגישה עם הפסיכולוגית")."""
+    return WITHHELD_TITLE if is_sensitive(goal.title) else goal.title
 
 
 def anonymize_talk(
@@ -139,49 +147,15 @@ def prepare_talk_message(
     goals: Sequence[Goal],
     notes: str,
 ) -> tuple[AnonymizedText, int]:
-    """The exact message that goes to the model, and how many sensitive sentences were removed.
+    """The exact message that goes to the model, and how many sensitive sentences (and goal titles)
+    were removed.
     One function for the pipeline AND the dry run, so the dry run never shows something else."""
     kept, removed = remove_sensitive_sentences(notes)
+    removed += sum(1 for goal in goals if is_sensitive(goal.title))
     return anonymize_talk(roster, trainee, counselor, held_on, goals, kept), removed
 
 
 # --- content validation -----------------------------------------------------------------------------
-
-
-# Health and diagnoses never become long-term memory. The prompt says so; this list is the second
-# line of defense, in code. Whole words, with Hebrew prefix letters. Over-matching is fine: a note
-# that is dropped by mistake is easy for the counselor to write by hand.
-_SENSITIVE_WORDS = (
-    "רופא רופאה רופאים תרופה תרופות תרופתי תרופתית כאב כאבי כאבים כואב כואבת מחלה מחלות חולה חולים "
-    "אבחנה אבחנות אבחון אובחן אובחנה אובחנו מאובחן מאובחנת הפרעה הפרעת הפרעות קשב דיכאון "
-    "חרדה חרדות פסיכולוג פסיכולוגית פסיכולוגי פסיכיאטר פסיכיאטרית ריטלין אשפוז אושפז אושפזה "
-    "מאושפז מאושפזת פציעה פצוע פצועה נפצע נפצעה תסמונת בריאות בריאותי בריאותית ADHD"
-).split()
-_SENSITIVE = re.compile(rf"(?<!\w)[ובכלמשה]{{0,3}}(?:{'|'.join(_SENSITIVE_WORDS)})(?!\w)", re.IGNORECASE)
-
-
-def is_sensitive(text: str) -> bool:
-    return _SENSITIVE.search(text) is not None
-
-
-# A sentence ends at . ! ? or a line break. Hebrew notes rarely use anything else.
-_SENTENCE_END = re.compile(r"(?<=[.!?\n])")
-
-
-def remove_sensitive_sentences(notes: str) -> tuple[str, int]:
-    """The notes without the sentences about health or a diagnosis, and how many were removed.
-    Runs before anonymization and before anything is sent: what the model never receives, it can
-    never repeat, summarize or propose to remember. Over-matching is the safe direction here too:
-    a removed sentence costs a less complete summary, never a privacy leak."""
-    kept: list[str] = []
-    removed = 0
-    for sentence in _SENTENCE_END.split(notes):
-        if is_sensitive(sentence):
-            removed += 1
-            kept.append("\n" if sentence.endswith("\n") else "")  # keep the line structure
-        else:
-            kept.append(sentence)
-    return "".join(kept), removed
 
 
 @dataclass(frozen=True)
@@ -269,7 +243,7 @@ class TalkPipeline:
     def __init__(self, uow: UnitOfWork, router: Router, *, prompt: Prompt | None = None) -> None:
         self._uow = uow
         self._router = router
-        self._prompt = prompt or load_prompt("talk_summary", 1)
+        self._prompt = prompt or load_prompt("talk_summary", 2)
 
     def summarize(self, actor: StaffMember, talk_id: int) -> TalkResult:
         client = self._router.client_for(AITask.SUMMARIZE_TALK)

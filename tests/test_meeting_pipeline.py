@@ -108,7 +108,7 @@ def test_a_transcript_becomes_a_summary_and_proposals_with_real_names(uow, repos
     assert result.proposals[3].description == "לשוחח עם אדל אזולאי על ריצות הבוקר"  # token -> name, here
     assert "איתי ביטון" in result.meeting.summary and "[STAFF_" not in result.meeting.summary
     assert result.issues == []
-    assert result.prompt_ref == "meeting_extract@v2" and result.attempts == 1
+    assert result.prompt_ref == "meeting_extract@v3" and result.attempts == 1
     assert repos.proposals.list_by_meeting(meeting_id) == result.proposals  # saved, not only returned
 
 
@@ -124,7 +124,7 @@ def test_the_stored_anonymized_transcript_is_exactly_what_the_model_saw(uow, rep
 def test_the_model_gets_the_pinned_prompt_the_schema_and_the_route_budget(uow, manager, cloud):
     make_pipeline(uow, cloud).process(manager, record(uow, manager))
     [call] = cloud.calls
-    assert call.prompt.ref == "meeting_extract@v2"
+    assert call.prompt.ref == "meeting_extract@v3"
     assert call.response_schema == MeetingExtraction.model_json_schema()
     assert call.max_tokens == 4000  # ROUTES[EXTRACT_MEETING]
 
@@ -460,16 +460,32 @@ def test_kvar_in_the_weekly_meeting_is_a_word_not_a_trainee(uow, repos, manager,
 
 
 def test_the_anonymize_stage_knows_the_participants_like_the_extract_stage(uow, repos, manager, cloud):
-    """A counselor named שחר at the meeting: "שחר, תתאם" is him, already in the saved text of the
-    ANONYMIZED stage, so the text that is saved is exactly the text that is sent."""
-    shahar = repos.staff.add(StaffMember(full_name="שחר מימון", role=StaffRole.COUNSELOR))
+    """A counselor named גל (also "wave") at the meeting, the only גל in the academy: "גל, תתאם" is
+    him, already in the saved text of the ANONYMIZED stage, so what is saved is what is sent."""
+    shahar = repos.staff.add(StaffMember(full_name="גל מימון", role=StaffRole.COUNSELOR))
     sample = SampleMeeting(
         title="ישיבה קצרה",
         held_on=WEEKLY.held_on,
         participant_ids=[1, shahar.id],
-        transcript="רונית: שחר, תתאם את ההסעה לטיול. קמנו בשחר כדי להספיק הכול.",
+        transcript="רונית: גל, תתאם את ההסעה לטיול. קמנו מוקדם כדי להספיק הכול.",
     )
     meeting_id = record(uow, manager, sample)
     make_pipeline(uow, cloud).anonymize(manager, meeting_id)
     saved = repos.meetings.get(meeting_id).anonymized_transcript
     assert saved.startswith(f"[STAFF_1]: [STAFF_{shahar.id}], תתאם")
+
+
+def test_a_sentence_about_health_in_a_meeting_is_removed_before_sending(uow, repos, manager, cloud):
+    """The same policy as personal talks (decision 2026-10-18)."""
+    sample = SampleMeeting(
+        title="ישיבה קצרה",
+        held_on=WEEKLY.held_on,
+        participant_ids=[1, 3],
+        transcript="רונית: עומר, תתאם את ההסעה לטיול. אדל אמרה שהיא הולכת לרופא ביום חמישי. סיימנו.",
+    )
+    meeting_id = record(uow, manager, sample)
+    result = make_pipeline(uow, cloud).process(manager, meeting_id)
+    sent = cloud.calls[-1].user_message
+    assert "רופא" not in sent and "תתאם את ההסעה" in sent
+    assert result.removed_sentences == 1
+    assert "לרופא" in repos.meetings.get(meeting_id).transcript  # the raw transcript keeps it

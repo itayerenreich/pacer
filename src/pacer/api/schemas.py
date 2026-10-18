@@ -125,9 +125,12 @@ class ProcessResult(BaseModel):
     meeting: StaffMeeting
     proposals: list[ProposedTask]
     issues: list[IssueOut] = Field(description="What validation corrected in the model's answer. Check these")
-    prompt: str = Field(description="The exact prompt version used, e.g. meeting_extract@v2")
+    prompt: str = Field(description="The exact prompt version used, e.g. meeting_extract@v3")
     attempts: int = Field(description="1, or 2 if the model had to correct its first answer")
     cost_usd: float | None
+    removed_sentences: int = Field(
+        description="Sentences about health that were removed before sending; the transcript still has them"
+    )
 
     @classmethod
     def of(cls, result: ExtractionResult) -> "ProcessResult":
@@ -138,6 +141,7 @@ class ProcessResult(BaseModel):
             prompt=result.prompt_ref,
             attempts=result.attempts,
             cost_usd=result.cost_usd,
+            removed_sentences=result.removed_sentences,
         )
 
 

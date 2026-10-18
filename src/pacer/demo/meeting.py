@@ -35,7 +35,7 @@ def dry_run(sample: SampleMeeting) -> str:
         participants = [s for i in sample.participant_ids if (s := repos.staff.get(i)) is not None]
     if not roster.people:
         raise SystemExit("The database is empty. Load the demo first: uv run python -m pacer.demo --reset")
-    safe = anonymize_meeting(roster, sample.transcript, participants)  # the pipeline's own code path
+    safe, removed = anonymize_meeting(roster, sample.transcript, participants)  # the pipeline's own code path
     lines = [
         f"# Dry run: {sample.title}",
         "",
@@ -45,7 +45,8 @@ def dry_run(sample: SampleMeeting) -> str:
         extraction_message(safe, sample.held_on, participants),
         "```",
         "",
-        f"People replaced by tokens: {len(safe.people)}. Ambiguous names (neutral tokens): {len(safe.unresolved)}.",
+        f"People replaced by tokens: {len(safe.people)}. Neutral tokens (ambiguous names, or words): "
+        f"{len(safe.unresolved)}. Sentences about health removed: {removed}.",
     ]
     return "\n".join(lines)
 
