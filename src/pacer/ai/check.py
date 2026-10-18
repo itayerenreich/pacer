@@ -72,14 +72,14 @@ def check_structured() -> bool:
     return True
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="python -m pacer.ai.check",
         description=__doc__,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument("--only", choices=["claude", "local", "structured"])
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     configure_logging()
 
     results = []

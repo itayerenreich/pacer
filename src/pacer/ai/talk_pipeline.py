@@ -131,6 +131,20 @@ def anonymize_talk(
     )
 
 
+def prepare_talk_message(
+    roster: Roster,
+    trainee: Trainee,
+    counselor: StaffMember,
+    held_on: date,
+    goals: Sequence[Goal],
+    notes: str,
+) -> tuple[AnonymizedText, int]:
+    """The exact message that goes to the model, and how many sensitive sentences were removed.
+    One function for the pipeline AND the dry run, so the dry run never shows something else."""
+    kept, removed = remove_sensitive_sentences(notes)
+    return anonymize_talk(roster, trainee, counselor, held_on, goals, kept), removed
+
+
 # --- content validation -----------------------------------------------------------------------------
 
 
@@ -271,8 +285,7 @@ class TalkPipeline:
 
         # 2. Sensitive sentences out, then one document, anonymized as a whole. Only safe.text goes
         #    to the model.
-        notes, removed = remove_sensitive_sentences(talk.notes)
-        safe = anonymize_talk(roster, trainee, counselor, talk.held_on, goals, notes)
+        safe, removed = prepare_talk_message(roster, trainee, counselor, talk.held_on, goals, talk.notes)
         if Anonymizer(roster).contains_known_name(safe.text):  # defense in depth, right before sending
             raise AnonymizationError(f"Talk {talk_id}: a known name is in the message; nothing was sent")
 

@@ -15,7 +15,7 @@ from pathlib import Path
 from pacer.ai import LLMError
 from pacer.ai.anonymization import load_roster
 from pacer.ai.routing import AITask, get_router
-from pacer.ai.talk_pipeline import TalkPipeline, anonymize_talk, talk_service
+from pacer.ai.talk_pipeline import TalkPipeline, prepare_talk_message, talk_service
 from pacer.logging_config import configure_logging, use_utf8_console
 from pacer.repositories import get_engine, repositories
 
@@ -29,7 +29,8 @@ def dry_run(sample: SampleTalk) -> str:
             raise SystemExit("Load the demo first: uv run python -m pacer.demo --reset")
         goals = repos.goals.list_by_trainee(trainee.key)
         roster = load_roster(repos.staff, repos.trainees)
-    safe = anonymize_talk(roster, trainee, counselor, sample.held_on, goals, sample.notes)  # the pipeline's own path
+    # the pipeline's own code path
+    safe, removed = prepare_talk_message(roster, trainee, counselor, sample.held_on, goals, sample.notes)
     return "\n".join(
         [
             "# Dry run: personal talk",
@@ -39,6 +40,8 @@ def dry_run(sample: SampleTalk) -> str:
             "```",
             safe.text,
             "```",
+            "",
+            f"Sentences about health removed before sending: {removed}. Your notes keep them.",
         ]
     )
 
