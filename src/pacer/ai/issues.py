@@ -31,6 +31,7 @@ class IssueCode(StrEnum):
     UNKNOWN_PASSAGE = "unknown_passage"  # a cited passage id that was never sent
     UNSUPPORTED_CLAIM = "unsupported_claim"  # a claim with no passage behind it
     NO_CITATIONS = "no_citations"  # an answer that cites nothing
+    CONTRADICTORY_COVERAGE = "contradictory_coverage"  # "the library has nothing", with claims that cite it
 
 
 @dataclass(frozen=True)

@@ -13,7 +13,7 @@ from fakes import FakeUnitOfWork, empty_repos
 from fastapi.testclient import TestClient
 
 from pacer.ai.anonymization import Anonymizer, Person, PersonKind, Roster
-from pacer.ai.answer import NO_SOURCE, LibraryAnswer, LibraryAnswerer, answer_message, validate_answer
+from pacer.ai.answer import NO_SOURCE, Coverage, LibraryAnswer, LibraryAnswerer, answer_message, validate_answer
 from pacer.ai.embeddings import EmbeddingSpec
 from pacer.ai.issues import IssueCode
 from pacer.ai.library import retrieve
@@ -144,7 +144,7 @@ def test_claims_cite_only_passages_that_were_sent(uow, repos):
             {"text": "עד עשרים וחמישה למלמד אחד.", "passages": ["P1", "P9"]},
             {"text": "טענה בלי מקור.", "passages": ["P7"]},
         ],
-        insufficient=False,
+        coverage="direct",
     )
     result = validate_answer(raw, hits_for(uow, repos), anonymized("ואדל?"))
     assert [(c.text, c.passages) for c in result.claims] == [("עד עשרים וחמישה למלמד אחד.", ["P1"])]
@@ -159,16 +159,27 @@ def test_claims_cite_only_passages_that_were_sent(uow, repos):
 
 def test_an_answer_that_cites_nothing_is_reported_unless_it_says_it_cannot_answer(uow, repos):
     hits = hits_for(uow, repos)
-    silent = validate_answer(LibraryAnswer(answer="תשובה", claims=[], insufficient=False), hits, anonymized("ש"))
-    honest = validate_answer(LibraryAnswer(answer="אין מקור", claims=[], insufficient=True), hits, anonymized("ש"))
+    silent = validate_answer(LibraryAnswer(answer="תשובה", claims=[], coverage="direct"), hits, anonymized("ש"))
+    honest = validate_answer(LibraryAnswer(answer="אין מקור", claims=[], coverage="none"), hits, anonymized("ש"))
     assert [i.code for i in silent.issues] == [IssueCode.NO_CITATIONS]
-    assert honest.issues == []
+    assert honest.issues == [] and honest.insufficient
+
+
+def test_a_partial_answer_is_an_answer_and_none_with_claims_is_reported(uow, repos):
+    """The live test found it: Rambam on teachers of children, asked about counselors. Claude answered
+    with citations and flagged "insufficient", because one flag meant both "nothing" and "only related"."""
+    hits = hits_for(uow, repos)
+    claims = [{"text": "ברמב\"ם: עשרים וחמישה למלמד.", "passages": ["P1"]}]
+    partial = validate_answer(LibraryAnswer(answer="יישום", claims=claims, coverage="partial"), hits, anonymized("ש"))
+    torn = validate_answer(LibraryAnswer(answer="אין, אבל", claims=claims, coverage="none"), hits, anonymized("ש"))
+    assert partial.coverage is Coverage.PARTIAL and not partial.insufficient and partial.issues == []
+    assert [i.code for i in torn.issues] == [IssueCode.CONTRADICTORY_COVERAGE]
 
 
 # --- the whole flow --------------------------------------------------------------------------------------
 
 GOOD = json.dumps(
-    {"answer": "לפי הרמב\"ם, עשרים וחמישה למלמד.", "claims": [{"text": "עשרים וחמישה למלמד.", "passages": ["P1"]}], "insufficient": False},
+    {"answer": "לפי הרמב\"ם, עשרים וחמישה למלמד.", "claims": [{"text": "עשרים וחמישה למלמד.", "passages": ["P1"]}], "coverage": "direct"},
     ensure_ascii=False,
 )
 
@@ -189,7 +200,7 @@ def test_a_name_in_the_question_reaches_neither_model(uow, repos):
     assert all("אדל" not in q for q in embedder.queries)  # not even the local embedding model
     assert "אדל" not in cloud.calls[0].user_message and "[TRAINEE_1]" in cloud.calls[0].user_message
     assert result.question == "אדל אזולאי מתקשה בקבוצה גדולה, מה עושים?"  # the person who asked sees their words
-    assert result.prompt_ref == "library_answer@v1" and result.citations[0].cited
+    assert result.prompt_ref == "library_answer@v2" and result.citations[0].cited
 
 
 def test_a_local_only_source_never_goes_to_the_cloud_model(uow, repos):
@@ -237,7 +248,7 @@ def test_any_staff_member_can_ask_and_gets_citations_from_our_metadata(client):
     citation = body["citations"][0]
     assert citation["source"] == "משנה תורה, הלכות תלמוד תורה פרק ב' (רמב\"ם)"
     assert citation["evidence"] == "מקור ערכי-מסורתי" and citation["section"] == "הלכה 1"
-    assert body["prompt"] == "library_answer@v1"
+    assert body["prompt"] == "library_answer@v2" and body["coverage"] == "direct" and not body["insufficient"]
 
 
 def test_the_endpoint_needs_a_staff_member_and_a_real_question(client):

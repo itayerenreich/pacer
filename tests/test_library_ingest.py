@@ -228,3 +228,13 @@ def test_import_index_and_compare_against_postgresql(sample, engine, monkeypatch
     questions.write_text(json.dumps({"questions": [{"question": "כמה תינוקות למלמד אחד?", "expected": ["הלכות תלמוד תורה פרק ב'"]}]}, ensure_ascii=False), encoding="utf-8")
     report = cli.compare(questions, ["bge-m3"], ["structure-220"])
     assert "| bge-m3 | structure-220 | 1/1 | 1/1 | 1.00 |" in report
+
+
+def test_a_report_written_to_a_file_reads_right_to_left_in_a_markdown_preview(sample, tmp_path, capsys):
+    import pacer.library.__main__ as cli
+
+    out, manifest_path = tmp_path / "preview.md", tmp_path / "manifest.json"
+    manifest_path.write_text(manifest().model_dump_json(), encoding="utf-8")
+    cli.main(["preview", str(sample), "--manifest", str(manifest_path), "--out", str(out)])
+    text = out.read_text(encoding="utf-8")
+    assert text.startswith('<div dir="rtl">\n\n#') and text.endswith("\n\n</div>\n")  # blank lines: Markdown renders

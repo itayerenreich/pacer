@@ -8,7 +8,11 @@ uv run python -m pacer.library compare library/questions-classics.json --out dat
 
 preview needs no database and no model: it shows how the file would be split. index and search need
 Ollama running with the models pulled (ollama pull bge-m3, ollama pull qwen3-embedding:0.6b).
-Reports are UTF-8 Markdown: open them in VS Code (Ctrl+Shift+V). data/ is outside Git.
+The terminal shows Hebrew in the wrong order. Write a report to a file with --out and open it in VS Code
+with the Markdown preview (Ctrl+Shift+V): files are wrapped in a right-to-left block, so Hebrew reads
+normally. data/ is outside Git.
+
+uv run python -m pacer.library ask "השאלה שלך" --send --out data/answer.md
 """
 
 import argparse
@@ -99,6 +103,19 @@ def compare(questions_file: Path, models: list[str], chunkings: list[str], k: in
     return "\n".join(["# השוואת חיפוש: מודלים ושיטות חלוקה", "", *table, "", note, "", *details])
 
 
+COVERAGE_LABELS = {
+    "direct": "המקורות עונים על השאלה ישירות",
+    "partial": "המקורות עוסקים במצב קרוב, והתשובה מיישמת אותם",
+    "none": "אין בספרייה מקור לשאלה הזו",
+}
+
+
+def as_document(report: str) -> str:
+    """A report as a file: Markdown inside a right-to-left block, so a Markdown preview shows Hebrew in order.
+    The blank lines matter: without them, Markdown inside an HTML block is not rendered."""
+    return f'<div dir="rtl">\n\n{report}\n\n</div>\n'
+
+
 def ask(question: str, *, send: bool) -> str:
     """Dry run: the exact message Claude would get (anonymized question, passages). --send: the answer."""
     from pacer.ai.answer import LibraryAnswerer, answer_message
@@ -114,7 +131,7 @@ def ask(question: str, *, send: bool) -> str:
              answer_message(safe, hits), "```"]
         )
     result = answerer.ask(question)
-    lines = [f"# {question}", "", result.answer, ""]
+    lines = [f"# {question}", "", f"**{COVERAGE_LABELS[result.coverage]}**", "", result.answer, ""]
     if result.claims:
         lines += ["## טענות ומקורות", ""] + [f"- {c.text} [{', '.join(c.passages)}]" for c in result.claims] + [""]
     if result.citations:
@@ -190,7 +207,7 @@ def main(argv: list[str] | None = None) -> None:
         print(report)
         if getattr(args, "out", None):
             args.out.parent.mkdir(parents=True, exist_ok=True)
-            args.out.write_text(report + "\n", encoding="utf-8")
+            args.out.write_text(as_document(report), encoding="utf-8")
             print(f"\nWritten to {args.out}")
 
 

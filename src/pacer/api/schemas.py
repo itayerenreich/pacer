@@ -16,7 +16,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from pacer.ai.answer import AskResult
+from pacer.ai.answer import AskResult, Coverage
 from pacer.ai.issues import Issue, IssueCode
 from pacer.ai.meeting_pipeline import ExtractionResult
 from pacer.ai.talk_pipeline import TalkResult
@@ -145,6 +145,10 @@ class AskOut(BaseModel):
 
     question: str
     answer: str
+    coverage: Coverage = Field(
+        description="direct: the sources answer the question; partial: the answer applies sources about a related "
+        "situation; none: the library has no source for it"
+    )
     insufficient: bool = Field(description="True when the library has no source that answers the question")
     claims: list[ClaimOut]
     citations: list[CitationOut]
@@ -157,6 +161,7 @@ class AskOut(BaseModel):
         return cls(
             question=result.question,
             answer=result.answer,
+            coverage=result.coverage,
             insufficient=result.insufficient,
             claims=[ClaimOut(text=c.text, passages=c.passages) for c in result.claims],
             citations=[CitationOut(**vars(c)) for c in result.citations],

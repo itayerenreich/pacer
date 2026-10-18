@@ -17,6 +17,7 @@ who are not in the academy. So the final name check runs on the anonymized QUEST
 import logging
 import re
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -35,6 +36,16 @@ log = logging.getLogger(__name__)
 NO_SOURCE = "לא נמצא בספרייה מקור שעונה על השאלה הזו. אפשר לנסח אותה אחרת, או להוסיף לספרייה מקור מתאים."
 
 
+class Coverage(StrEnum):
+    """How well the passages answer the question. Three values, because "yes / no" hid the common case:
+    a classical source about teachers of children does not answer a question about counselors directly,
+    but applying it is a useful, honest answer, as long as it says that it is an application."""
+
+    DIRECT = "direct"  # the passages answer the question itself
+    PARTIAL = "partial"  # they answer a related or broader situation; the answer applies them, and says so
+    NONE = "none"  # nothing in them helps: no claims, only what the library does and does not cover
+
+
 class AnswerClaim(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -47,7 +58,7 @@ class LibraryAnswer(BaseModel):
 
     answer: str = Field(max_length=5000, description="Hebrew, 2-6 short paragraphs")
     claims: list[AnswerClaim] = Field(max_length=20)
-    insufficient: bool = Field(description="True when the passages do not answer the question")
+    coverage: Coverage = Field(description="direct, partial (applied from a related situation), or none")
 
 
 @dataclass(frozen=True)
@@ -72,12 +83,17 @@ class SupportedClaim:
 class AskResult:
     question: str
     answer: str
-    insufficient: bool
+    coverage: Coverage
     claims: list[SupportedClaim]
     citations: list[Citation]
     issues: list[Issue] = field(default_factory=list)
     prompt_ref: str | None = None  # None when no model was asked
     cost_usd: float | None = 0.0
+
+    @property
+    def insufficient(self) -> bool:
+        """The library has no source for this question."""
+        return self.coverage is Coverage.NONE
 
 
 def passage_ids(hits: list[ScoredChunk]) -> list[str]:
@@ -123,8 +139,10 @@ def validate_answer(raw: LibraryAnswer, hits: list[ScoredChunk], question: Anony
             issues.append(Issue(IssueCode.UNSUPPORTED_CLAIM, number, "no passage behind this claim; not listed"))
             continue
         claims.append(SupportedClaim(restore(claim.text, number), valid))
-    if not raw.insufficient and not claims:
+    if raw.coverage is not Coverage.NONE and not claims:
         issues.append(Issue(IssueCode.NO_CITATIONS, None, "an answer without a single supported claim"))
+    if raw.coverage is Coverage.NONE and claims:
+        issues.append(Issue(IssueCode.CONTRADICTORY_COVERAGE, None, "says the library has nothing, yet cites it"))
 
     cited = {p for c in claims for p in c.passages}
     citations = [
@@ -143,7 +161,7 @@ def validate_answer(raw: LibraryAnswer, hits: list[ScoredChunk], question: Anony
     return AskResult(
         question="",  # filled by the caller, with the original wording
         answer=restore(raw.answer, None),
-        insufficient=raw.insufficient,
+        coverage=raw.coverage,
         claims=claims,
         citations=citations,
         issues=issues,
@@ -168,7 +186,7 @@ class LibraryAnswerer:
         self._embedder = embedder
         self._chunking = chunking
         self._k = k
-        self._prompt = prompt or load_prompt("library_answer", 1)  # pinned
+        self._prompt = prompt or load_prompt("library_answer", 2)  # pinned
 
     def prepare(self, question: str) -> tuple[AnonymizedText, list[ScoredChunk]]:
         """Everything before the model: anonymize the question, and retrieve passages for it.
@@ -187,7 +205,7 @@ class LibraryAnswerer:
         safe, hits = self.prepare(question)
         if not hits:
             log.info("Library question: no passage above the floor; no model asked")
-            return AskResult(question=question, answer=NO_SOURCE, insufficient=True, claims=[], citations=[])
+            return AskResult(question=question, answer=NO_SOURCE, coverage=Coverage.NONE, claims=[], citations=[])
         client = self._router.client_for(AITask.ANSWER_FROM_LIBRARY)
         max_tokens = self._router.route(AITask.ANSWER_FROM_LIBRARY).max_tokens
         result = complete_structured(
@@ -198,11 +216,11 @@ class LibraryAnswerer:
         answer.prompt_ref = result.prompt_ref
         answer.cost_usd = result.cost_usd
         log.info(
-            "Library question answered: passages=%s cited=%s claims=%s issues=%s insufficient=%s",
+            "Library question answered: passages=%s cited=%s claims=%s issues=%s coverage=%s",
             len(hits),
             sum(c.cited for c in answer.citations),
             len(answer.claims),
             len(answer.issues),
-            answer.insufficient,
+            answer.coverage,
         )
         return answer

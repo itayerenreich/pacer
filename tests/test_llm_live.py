@@ -227,7 +227,8 @@ def test_claude_answers_from_the_library_and_says_so_when_it_cannot():
     answerer = LibraryAnswerer(uow, get_router(), embedder, "fixed-200-40")
 
     result = answerer.ask("כמה חניכים יכול מדריך אחד ללוות, ומתי צריך עוד איש צוות?")
-    assert not result.insufficient and result.issues == [], result.issues
+    # The passages speak of teachers of children, so "partial" (an application) is as right as "direct"
+    assert not result.insufficient and result.issues == [], (result.coverage, result.issues)
     assert any(c.passage == "P1" and c.cited and c.section == "הלכה ה" for c in result.citations) or any(
         c.cited and c.section == "הלכה ה" for c in result.citations
     )
