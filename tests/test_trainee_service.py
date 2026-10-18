@@ -6,6 +6,7 @@ from fakes import World
 from pacer.domain import ApprovalKind, Trainee, TraineeStatus
 from pacer.services import (
     ApprovalService,
+    NotFoundError,
     PermissionDeniedError,
     RuleViolationError,
     TraineeService,
@@ -67,7 +68,7 @@ def test_group_must_be_in_the_same_cohort(world, service):
 
 def test_group_counselors_see_the_trainee_others_do_not(world, service):
     assert service.get(world.omer, world.yael.id) == world.yael
-    with pytest.raises(PermissionDeniedError):
+    with pytest.raises(NotFoundError):
         service.get(world.dana, world.yael.id)
 
 
@@ -104,7 +105,7 @@ def test_access_ends_when_the_counselor_no_longer_leads_the_group(world, service
     approvals.approve(world.manager, request.id)
     world.groups.update(world.group_a.model_copy(update={"counselor_ids": [world.omer.id]}))  # Noa moved
 
-    with pytest.raises(PermissionDeniedError):
+    with pytest.raises(NotFoundError):  # she no longer sees the trainee at all
         service.get_personal_file(world.noa, world.yael.id)
 
 

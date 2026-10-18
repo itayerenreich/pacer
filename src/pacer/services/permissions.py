@@ -10,7 +10,8 @@ The rules, in one place:
                        (checked in TraineeService, because it needs the database).
 
 The functions take domain objects and return bool, so they need no database and
-are trivial to test. Services call require() to turn a False into an error.
+are trivial to test. Services call require() to turn a False into an error (403), and
+visibility.visible_trainee() when the actor may not even SEE the record (404).
 """
 
 from pacer.domain import Group, StaffMember, StaffRole, Trainee

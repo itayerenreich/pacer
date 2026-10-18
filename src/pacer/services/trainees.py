@@ -10,10 +10,16 @@ from pacer.domain import (
     Trainee,
     TraineeStatus,
 )
-from pacer.repositories.interfaces import ApprovalRequestRepo, GroupRepo, PersonalFileRepo, TraineeRepo
+from pacer.repositories.interfaces import (
+    ApprovalRequestRepo,
+    GroupRepo,
+    PersonalFileRepo,
+    TraineeRepo,
+)
 
 from .errors import RuleViolationError, found
-from .permissions import can_view_trainee, is_manager, leads_group, require
+from .permissions import is_manager, require
+from .visibility import visible_trainee
 
 log = logging.getLogger(__name__)
 
@@ -50,25 +56,20 @@ class TraineeService:
         return added
 
     def get(self, actor: StaffMember, trainee_id: int) -> Trainee:
-        trainee = found(self._trainees.get(trainee_id), "Trainee", trainee_id)
-        group = found(self._groups.get(trainee.group_id), "Group", trainee.group_id)
-        require(can_view_trainee(actor, group), "view this trainee")
-        return trainee
+        return visible_trainee(actor, self._trainees, self._groups, trainee_id)
 
     def get_personal_file(self, actor: StaffMember, trainee_id: int) -> PersonalFile:
-        """Manager: always. Counselor: only one who leads the group AND has an approved request."""
-        trainee = found(self._trainees.get(trainee_id), "Trainee", trainee_id)
+        """Manager: always. Counselor: only one who leads the group AND has an approved request.
+        A counselor who cannot see the trainee at all gets 404; one who can, but has no approval, 403."""
+        visible_trainee(actor, self._trainees, self._groups, trainee_id)
         if not is_manager(actor):
-            group = found(self._groups.get(trainee.group_id), "Group", trainee.group_id)
             approved = self._approvals.exists_with_status(
                 kind=ApprovalKind.VIEW_PERSONAL_FILE,
                 trainee_id=trainee_id,
                 requested_by_id=actor.id,
                 status=ApprovalStatus.APPROVED,
             )
-            require(
-                leads_group(actor, group) and approved, "view this personal file without manager approval"
-            )
+            require(approved, "view this personal file without manager approval")
         personal_file = found(
             self._personal_files.get_by_trainee(trainee_id), "Personal file of trainee", trainee_id
         )

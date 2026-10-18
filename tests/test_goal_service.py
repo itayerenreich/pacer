@@ -48,9 +48,12 @@ def test_manager_can_update_progress(world, service):
     assert service.update_progress(world.manager, world.goal.id, 10, "Started").progress == 10
 
 
-@pytest.mark.parametrize("counselor", ["omer", "dana"])
-def test_other_counselors_cannot_update_progress(world, service, counselor):
-    with pytest.raises(PermissionDeniedError):
+@pytest.mark.parametrize(
+    ("counselor", "error"),
+    [("omer", PermissionDeniedError), ("dana", NotFoundError)],  # same group: sees, may not edit. Other: 404
+)
+def test_other_counselors_cannot_update_progress(world, service, counselor, error):
+    with pytest.raises(error):
         service.update_progress(getattr(world, counselor), world.goal.id, 40, "Trying")
     assert world.goal_updates.list_by_goal(world.goal.id) == []
 
@@ -94,7 +97,17 @@ def test_no_new_goals_for_a_trainee_who_left(world, service):
 
 
 def test_counselor_of_another_group_cannot_read_goals_or_history(world, service):
-    with pytest.raises(PermissionDeniedError):
+    with pytest.raises(NotFoundError, match="Trainee"):
         service.list_goals(world.dana, world.yael.id)
-    with pytest.raises(PermissionDeniedError):
+    with pytest.raises(NotFoundError, match=f"Goal {world.goal.id} does not exist"):
         service.history(world.dana, world.goal.id)
+
+
+def test_a_stranger_learns_nothing_about_a_closed_file(world, service):
+    """For a counselor of another group, a trainee who LEFT is a 404 like any other, not a 409
+    "the file is closed": visibility is checked before anything that depends on the record."""
+    world.trainees.update(world.yael.with_status(TraineeStatus.LEFT))
+    with pytest.raises(NotFoundError):
+        service.update_progress(world.dana, world.goal.id, 40, "Trying")
+    with pytest.raises(RuleViolationError):  # who may see her gets the real reason
+        service.update_progress(world.noa, world.goal.id, 40, "Trying")

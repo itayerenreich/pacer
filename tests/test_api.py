@@ -186,8 +186,11 @@ def test_enroll_with_counselor_outside_the_group_409(client, world):
     assert client.post("/trainees", json=body, headers=as_(world.manager)).status_code == 409
 
 
-def test_counselor_of_another_group_cannot_see_the_trainee_403(client, world):
-    assert client.get(f"/trainees/{world.yael.id}", headers=as_(world.dana)).status_code == 403
+def test_counselor_of_another_group_gets_404_as_if_the_trainee_did_not_exist(client, world):
+    hidden = client.get(f"/trainees/{world.yael.id}", headers=as_(world.dana))
+    missing = client.get("/trainees/999", headers=as_(world.dana))
+    assert hidden.status_code == missing.status_code == 404
+    assert hidden.json()["detail"] == f"Trainee {world.yael.id} does not exist"  # same words: nothing to learn
 
 
 def test_manager_changes_status(client, world):

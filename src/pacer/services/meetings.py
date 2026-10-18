@@ -24,10 +24,16 @@ from pacer.domain import (
 )
 from pacer.domain.meeting import DESCRIPTION_MAX_LENGTH, PROPOSAL_TRANSITIONS
 from pacer.domain.state import require_transition
-from pacer.repositories.interfaces import MeetingRepo, ProposedTaskRepo, StaffRepo, TaskRepo
+from pacer.repositories.interfaces import (
+    MeetingRepo,
+    ProposedTaskRepo,
+    StaffRepo,
+    TaskRepo,
+)
 
 from .errors import RuleViolationError, found
 from .permissions import is_manager, require
+from .visibility import hidden
 
 log = logging.getLogger(__name__)
 
@@ -199,7 +205,8 @@ class TaskService:
 
     def complete(self, actor: StaffMember, task_id: int) -> Task:
         task = found(self._tasks.get(task_id), "Task", task_id)
-        require(task.owner_id == actor.id or is_manager(actor), "complete someone else's task")
+        if task.owner_id != actor.id and not is_manager(actor):
+            raise hidden("Task", task_id)  # a counselor sees only their own tasks: someone else's is a 404
         done = self._tasks.update(task.complete())  # InvalidTransition if already done
         log.info("Task %s completed by staff %s", task_id, actor.id)
         return done

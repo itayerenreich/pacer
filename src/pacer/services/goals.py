@@ -3,10 +3,16 @@
 import logging
 
 from pacer.domain import Goal, GoalUpdate, StaffMember, Trainee
-from pacer.repositories.interfaces import GoalRepo, GoalUpdateRepo, GroupRepo, TraineeRepo
+from pacer.repositories.interfaces import (
+    GoalRepo,
+    GoalUpdateRepo,
+    GroupRepo,
+    TraineeRepo,
+)
 
 from .errors import RuleViolationError, found
-from .permissions import can_edit_goals, can_view_trainee, require
+from .permissions import can_edit_goals, require
+from .visibility import visible_trainee
 
 log = logging.getLogger(__name__)
 
@@ -28,7 +34,7 @@ class GoalService:
         self._groups = groups
 
     def add_goal(self, actor: StaffMember, goal: Goal) -> Goal:
-        trainee = self._open_trainee(goal.trainee_id)
+        trainee = self._open_trainee(actor, goal.trainee_id)
         require(can_edit_goals(actor, trainee), "add goals for this trainee")
         added = self._goals.add(goal)
         log.info("Goal %s added for trainee %s by staff %s", added.id, trainee.id, actor.id)
@@ -52,7 +58,7 @@ class GoalService:
 
     def _record(self, actor: StaffMember, goal_id: int, progress: int, note: str) -> tuple[Goal, GoalUpdate]:
         goal = found(self._goals.get(goal_id), "Goal", goal_id)
-        trainee = self._open_trainee(goal.trainee_id)
+        trainee = self._open_trainee(actor, goal.trainee_id, what="Goal", object_id=goal_id)
         require(can_edit_goals(actor, trainee), "update this goal")
 
         updated = goal.with_progress(progress)  # a new object; raises if the goal was dropped
@@ -69,23 +75,21 @@ class GoalService:
         return updated, update
 
     def list_goals(self, actor: StaffMember, trainee_id: int) -> list[Goal]:
-        self._require_can_view(actor, trainee_id)
+        visible_trainee(actor, self._trainees, self._groups, trainee_id)
         return self._goals.list_by_trainee(trainee_id)
 
     def history(self, actor: StaffMember, goal_id: int) -> list[GoalUpdate]:
         """Every progress update of one goal, oldest first."""
         goal = found(self._goals.get(goal_id), "Goal", goal_id)
-        self._require_can_view(actor, goal.trainee_id)
+        visible_trainee(actor, self._trainees, self._groups, goal.trainee_id, what="Goal", object_id=goal_id)
         return self._updates.list_by_goal(goal_id)
 
-    def _open_trainee(self, trainee_id: int) -> Trainee:
-        """The trainee, if their file is still open (not LEFT or GRADUATED)."""
-        trainee = found(self._trainees.get(trainee_id), "Trainee", trainee_id)
+    def _open_trainee(
+        self, actor: StaffMember, trainee_id: int, *, what: str = "Trainee", object_id: int | None = None
+    ) -> Trainee:
+        """The trainee, if this actor may see them (else 404) and their file is still open (else 409).
+        Visibility first: "the file is closed" would tell a stranger the trainee's status."""
+        trainee = visible_trainee(actor, self._trainees, self._groups, trainee_id, what=what, object_id=object_id)
         if trainee.is_closed:
             raise RuleViolationError(f"Trainee {trainee_id} is {trainee.status}; goals can no longer change")
         return trainee
-
-    def _require_can_view(self, actor: StaffMember, trainee_id: int) -> None:
-        trainee = found(self._trainees.get(trainee_id), "Trainee", trainee_id)
-        group = found(self._groups.get(trainee.group_id), "Group", trainee.group_id)
-        require(can_view_trainee(actor, group), "view this trainee's goals")

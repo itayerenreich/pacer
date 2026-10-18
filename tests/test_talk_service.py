@@ -18,6 +18,7 @@ from pacer.domain import (
 )
 from pacer.services import (
     GoalService,
+    NotFoundError,
     PermissionDeniedError,
     RuleViolationError,
     TalkDraft,
@@ -75,7 +76,7 @@ def test_a_counselor_of_another_group_sees_nothing(world, service):
         lambda: service.list_notes(world.dana, world.yael.id),
         lambda: service.list_proposals(world.dana, talk.id),
     ):
-        with pytest.raises(PermissionDeniedError):
+        with pytest.raises(NotFoundError):  # as if none of it existed
             action()
 
 
@@ -131,7 +132,7 @@ def test_only_the_primary_counselor_or_the_manager_decides(world, service):
     _, [proposal] = summarized_talk(world, service, [PROGRESS])
     with pytest.raises(PermissionDeniedError):
         service.approve_proposal(world.omer, proposal.id)
-    with pytest.raises(PermissionDeniedError):
+    with pytest.raises(NotFoundError):  # another group: not even visible
         service.reject_proposal(world.dana, proposal.id)
     assert service.approve_proposal(world.manager, proposal.id).status is ProposalStatus.APPROVED
 

@@ -7,11 +7,18 @@ who is asking, whether they may ask, and what happens when a request is approved
 
 import logging
 
-from pacer.domain import ApprovalKind, ApprovalRequest, ApprovalStatus, StaffMember, TraineeStatus
+from pacer.domain import (
+    ApprovalKind,
+    ApprovalRequest,
+    ApprovalStatus,
+    StaffMember,
+    TraineeStatus,
+)
 from pacer.repositories.interfaces import ApprovalRequestRepo, GroupRepo, TraineeRepo
 
 from .errors import RuleViolationError, found
-from .permissions import is_manager, leads_group, require
+from .permissions import is_manager, require
+from .visibility import visible_trainee
 
 log = logging.getLogger(__name__)
 
@@ -32,9 +39,7 @@ class ApprovalService:
     ) -> ApprovalRequest:
         if is_manager(actor):
             raise RuleViolationError("The manager does not need approval; act directly")
-        trainee = found(self._trainees.get(trainee_id), "Trainee", trainee_id)
-        group = found(self._groups.get(trainee.group_id), "Group", trainee.group_id)
-        require(leads_group(actor, group), "ask for approvals about a trainee outside your groups")
+        trainee = visible_trainee(actor, self._trainees, self._groups, trainee_id)  # outside your groups: 404
 
         same = {"kind": kind, "trainee_id": trainee_id, "requested_by_id": actor.id}
         if self._approvals.exists_with_status(**same, status=ApprovalStatus.PENDING):

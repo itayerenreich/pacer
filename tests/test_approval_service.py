@@ -30,7 +30,7 @@ def test_group_counselor_can_ask(world, service):
 
 
 def test_counselor_of_another_group_cannot_ask(world, service):
-    with pytest.raises(PermissionDeniedError):
+    with pytest.raises(NotFoundError):  # a trainee they may not see does not exist for them
         service.request(world.dana, VIEW, world.yael.id, "Just looking")
 
 

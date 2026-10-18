@@ -187,7 +187,7 @@ def test_each_staff_member_sees_their_own_tasks_and_completes_them(world, servic
 def test_only_the_owner_or_the_manager_completes_a_task(world, service, tasks):
     _, [transport, _] = extracted(world, service, TRANSPORT, EQUIPMENT)
     task = service.approve_proposal(world.manager, transport.id)
-    with pytest.raises(PermissionDeniedError):
+    with pytest.raises(NotFoundError):  # someone else's task does not exist for a counselor
         tasks.complete(world.noa, task.id)
     assert tasks.complete(world.manager, task.id).status is TaskStatus.DONE
 

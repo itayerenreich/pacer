@@ -27,8 +27,12 @@ from pacer.domain import (
     Trainee,
     TraineeNote,
 )
-from pacer.domain.talk import NOTE_MAX_LENGTH, REASON_MAX_LENGTH, TALK_PROPOSAL_TRANSITIONS
 from pacer.domain.state import require_transition
+from pacer.domain.talk import (
+    NOTE_MAX_LENGTH,
+    REASON_MAX_LENGTH,
+    TALK_PROPOSAL_TRANSITIONS,
+)
 from pacer.repositories.interfaces import (
     GoalRepo,
     GroupRepo,
@@ -40,7 +44,8 @@ from pacer.repositories.interfaces import (
 
 from .errors import RuleViolationError, found
 from .goals import GoalService
-from .permissions import can_edit_goals, can_view_trainee, require
+from .permissions import can_edit_goals, require
+from .visibility import visible_trainee
 
 log = logging.getLogger(__name__)
 
@@ -87,7 +92,7 @@ class TalkService:
     # --- talks ----------------------------------------------------------------------------------
 
     def record_talk(self, actor: StaffMember, trainee_id: int, *, held_on: date, notes: str) -> PersonalTalk:
-        trainee = self._open_trainee(trainee_id)
+        trainee = self._open_trainee(actor, trainee_id)
         require(can_edit_goals(actor, trainee), "record talks with this trainee")
         talk = self._talks.add(
             PersonalTalk(trainee_id=trainee_id, counselor_id=actor.id, held_on=held_on, notes=notes)
@@ -97,17 +102,17 @@ class TalkService:
 
     def get_talk(self, actor: StaffMember, talk_id: int) -> PersonalTalk:
         talk = found(self._talks.get(talk_id), "Talk", talk_id)
-        self._require_can_view(actor, talk.trainee_id)
+        self._visible(actor, talk.trainee_id, what="Talk", object_id=talk_id)
         return talk
 
     def list_talks(self, actor: StaffMember, trainee_id: int) -> list[PersonalTalk]:
-        self._require_can_view(actor, trainee_id)
+        self._visible(actor, trainee_id)
         return self._talks.list_by_trainee(trainee_id)
 
     def talk_to_summarize(self, actor: StaffMember, talk_id: int) -> tuple[PersonalTalk, Trainee]:
         """The talk and its trainee, if this actor may run the summary on it (the pipeline asks)."""
         talk = found(self._talks.get(talk_id), "Talk", talk_id)
-        trainee = self._open_trainee(talk.trainee_id)
+        trainee = self._open_trainee(actor, talk.trainee_id, what="Talk", object_id=talk_id)
         require(can_edit_goals(actor, trainee), "summarize talks with this trainee")
         return talk, trainee
 
@@ -169,11 +174,11 @@ class TalkService:
     # --- notes: the trainee's long-term memory ------------------------------------------------------
 
     def list_notes(self, actor: StaffMember, trainee_id: int) -> list[TraineeNote]:
-        self._require_can_view(actor, trainee_id)
+        self._visible(actor, trainee_id)
         return self._notes.list_by_trainee(trainee_id)
 
     def add_note(self, actor: StaffMember, trainee_id: int, *, kind: NoteKind, text: str) -> TraineeNote:
-        trainee = self._open_trainee(trainee_id)
+        trainee = self._open_trainee(actor, trainee_id)
         require(can_edit_goals(actor, trainee), "add notes about this trainee")
         note = self._notes.add(TraineeNote(trainee_id=trainee_id, kind=kind, text=text, author_id=actor.id))
         log.info("Note %s added for trainee %s by staff %s", note.id, trainee_id, actor.id)
@@ -182,7 +187,7 @@ class TalkService:
     def delete_note(self, actor: StaffMember, note_id: int) -> None:
         """Allowed even when the trainee's file is closed: removing personal data is always allowed."""
         note = found(self._notes.get(note_id), "Note", note_id)
-        trainee = found(self._trainees.get(note.trainee_id), "Trainee", note.trainee_id)
+        trainee = self._visible(actor, note.trainee_id, what="Note", object_id=note_id)
         require(can_edit_goals(actor, trainee), "delete notes about this trainee")
         self._notes.delete(note_id)
         log.info("Note %s about trainee %s deleted by staff %s", note_id, trainee.id, actor.id)
@@ -198,7 +203,7 @@ class TalkService:
         """
         proposal = found(self._proposals.get(proposal_id), "Talk proposal", proposal_id)
         talk = found(self._talks.get(proposal.talk_id), "Talk", proposal.talk_id)
-        trainee = self._open_trainee(talk.trainee_id)
+        trainee = self._open_trainee(actor, talk.trainee_id, what="Talk proposal", object_id=proposal_id)
         require(can_edit_goals(actor, trainee), "decide on proposals about this trainee")
         talk = self._talks.lock(talk.id)
         proposal = self._proposals.lock(proposal_id)  # re-read now that no one else can decide
@@ -212,13 +217,16 @@ class TalkService:
             self._talks.update(talk.advance(TalkStatus.REVIEWED))
             log.info("Talk %s: every proposal decided", talk_id)
 
-    def _open_trainee(self, trainee_id: int) -> Trainee:
-        trainee = found(self._trainees.get(trainee_id), "Trainee", trainee_id)
+    def _visible(
+        self, actor: StaffMember, trainee_id: int, *, what: str = "Trainee", object_id: int | None = None
+    ) -> Trainee:
+        return visible_trainee(actor, self._trainees, self._groups, trainee_id, what=what, object_id=object_id)
+
+    def _open_trainee(
+        self, actor: StaffMember, trainee_id: int, *, what: str = "Trainee", object_id: int | None = None
+    ) -> Trainee:
+        """Visible (else 404) and open (else 409), in that order: see services/visibility.py."""
+        trainee = self._visible(actor, trainee_id, what=what, object_id=object_id)
         if trainee.is_closed:
             raise RuleViolationError(f"Trainee {trainee_id} is {trainee.status}; the file is closed")
         return trainee
-
-    def _require_can_view(self, actor: StaffMember, trainee_id: int) -> None:
-        trainee = found(self._trainees.get(trainee_id), "Trainee", trainee_id)
-        group = found(self._groups.get(trainee.group_id), "Group", trainee.group_id)
-        require(can_view_trainee(actor, group), "view this trainee's talks and notes")
