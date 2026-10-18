@@ -1,5 +1,5 @@
 # Runs the whole test suite on every pull request and on every push to main.
-# Integration tests start a throwaway PostgreSQL 17 container with testcontainers;
+# Integration tests start a throwaway PostgreSQL 17 container (with pgvector) with testcontainers;
 # Docker is already installed on GitHub's ubuntu runners, and no .env is needed.
 name: tests
 

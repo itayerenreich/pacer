@@ -24,10 +24,12 @@ from .database import unit_of_work
 from .goal import GoalRepository, GoalUpdateRepository
 from .interfaces import (
     ApprovalRequestRepo,
+    ChunkRepo,
     CohortRepo,
     GoalRepo,
     GoalUpdateRepo,
     GroupRepo,
+    KnowledgeSourceRepo,
     MeetingRepo,
     PersonalFileRepo,
     PersonalTalkRepo,
@@ -38,6 +40,7 @@ from .interfaces import (
     TraineeNoteRepo,
     TraineeRepo,
 )
+from .library import ChunkRepository, KnowledgeSourceRepository
 from .meeting import MeetingRepository, ProposedTaskRepository, TaskRepository
 from .staff import StaffRepository
 from .talk import PersonalTalkRepository, TalkProposalRepository, TraineeNoteRepository
@@ -62,6 +65,8 @@ class Repos:
     talks: PersonalTalkRepo
     talk_proposals: TalkProposalRepo
     notes: TraineeNoteRepo
+    sources: KnowledgeSourceRepo
+    chunks: ChunkRepo
 
     @classmethod
     def over(cls, session: Session) -> "Repos":
@@ -80,6 +85,8 @@ class Repos:
             talks=PersonalTalkRepository(session),
             talk_proposals=TalkProposalRepository(session),
             notes=TraineeNoteRepository(session),
+            sources=KnowledgeSourceRepository(session),
+            chunks=ChunkRepository(session),
         )
 
 

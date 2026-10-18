@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:17
+    image: pgvector/pgvector:pg17  # PostgreSQL 17 with the pgvector extension (stage 4)
     container_name: pacer-db
     environment:
       POSTGRES_USER: ${POSTGRES_USER}

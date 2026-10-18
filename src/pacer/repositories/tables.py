@@ -6,7 +6,20 @@ domain layer; repositories translate between domain models and these rows.
 
 from datetime import date, datetime
 
-from sqlalchemy import JSON, CheckConstraint, Column, DateTime, ForeignKey, String, Table, Text
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Table,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -214,3 +227,48 @@ class TalkProposalRow(Base):
     goal_update_id: Mapped[int | None] = mapped_column(ForeignKey("goal_updates.id"))
     note_id: Mapped[int | None] = mapped_column(ForeignKey("trainee_notes.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+# --- the knowledge library (stage 4) ------------------------------------------------------------
+
+
+class KnowledgeSourceRow(Base):
+    __tablename__ = "knowledge_sources"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(300))
+    author: Mapped[str | None] = mapped_column(String(200))
+    year: Mapped[int | None]
+    kind: Mapped[str] = mapped_column(String(20))
+    evidence_level: Mapped[str] = mapped_column(String(20))
+    language: Mapped[str] = mapped_column(String(2))
+    license: Mapped[str] = mapped_column(String(20))
+    local_only: Mapped[bool] = mapped_column(Boolean)
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class ChunkRow(Base):
+    __tablename__ = "chunks"
+    __table_args__ = (UniqueConstraint("source_id", "chunking", "ordinal", name="uq_chunks_position"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # CASCADE: deleting a source deletes its chunks (and, through them, their embeddings)
+    source_id: Mapped[int] = mapped_column(ForeignKey("knowledge_sources.id", ondelete="CASCADE"), index=True)
+    chunking: Mapped[str] = mapped_column(String(50))
+    ordinal: Mapped[int] = mapped_column(Integer)
+    text: Mapped[str] = mapped_column(Text)
+    section: Mapped[str | None] = mapped_column(String(300))
+    page_start: Mapped[int | None]
+    page_end: Mapped[int | None]
+
+
+class ChunkEmbeddingRow(Base):
+    """One chunk as a vector, by one embedding model. Several models side by side while we compare
+    them. The column has no fixed dimension (models differ), so search is exact, not indexed:
+    for a library of a few thousand chunks that takes milliseconds (decision 2026-10-18)."""
+
+    __tablename__ = "chunk_embeddings"
+
+    chunk_id: Mapped[int] = mapped_column(ForeignKey("chunks.id", ondelete="CASCADE"), primary_key=True)
+    model: Mapped[str] = mapped_column(String(100), primary_key=True)
+    embedding: Mapped[list[float]] = mapped_column(Vector())

@@ -23,12 +23,19 @@ from .enums import (
 )
 from .errors import DomainRuleError, InvalidTransitionError
 from .goal import Goal, GoalUpdate
+from .library import CHUNK_MAX_LENGTH, Chunk, EvidenceLevel, KnowledgeSource, SourceKind, SourceLicense
 from .meeting import ProposedTask, StaffMeeting, Task
 from .staff import StaffMember
 from .talk import PersonalTalk, TalkProposal, TraineeNote
 from .trainee import PersonalFile, Trainee
 
 __all__ = [
+    "CHUNK_MAX_LENGTH",
+    "Chunk",
+    "EvidenceLevel",
+    "KnowledgeSource",
+    "SourceKind",
+    "SourceLicense",
     "Entity",
     "present",
     "ApprovalKind",
