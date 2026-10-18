@@ -71,7 +71,7 @@ def test_text_without_names_is_unchanged(anonymizer):
     ("text", "expected"),
     [
         ("דיברתי עם מאיה ולמאיה", "דיברתי עם [TRAINEE_6] ול[TRAINEE_6]"),
-        ("ושחר הגיע", "ו[TRAINEE_3] הגיע"),
+        ("ומאיה הגיעה", "ו[TRAINEE_6] הגיעה"),
         ("כשמאיה סיימה", "כש[TRAINEE_6] סיימה"),
         ("מנועה קיבלתי", "מ[STAFF_2] קיבלתי"),
         ("וכשהדר באה", "וכש[TRAINEE_5] באה"),
@@ -102,20 +102,47 @@ def test_every_name_with_every_prefix_combination_is_caught(anonymizer):
         assert not anonymizer.contains_known_name(result.text), (prefix, form)
 
 
-# --- names that are also words: over-masking ----------------------------------------------------
+# --- names that are also words: masked, but as the WORD (COMMON_WORD_NAMES) -------------------
 
 
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
-        ("קמנו בשחר לריצה", "קמנו ב[TRAINEE_3] לריצה"),  # dawn
-        ("היה טל על הדשא", "היה [TRAINEE_4] על הדשא"),  # dew
-        ("הבן של השכנים", "ה[TRAINEE_9] של השכנים"),  # son
+        ("קמנו בשחר לריצה", "קמנו ב[NAME_1] לריצה"),  # dawn
+        ("היה טל על הדשא", "היה [NAME_1] על הדשא"),  # dew
+        ("הבן של השכנים", "ה[NAME_1] של השכנים"),  # son
     ],
 )
-def test_names_that_are_also_words_are_masked_anyway(anonymizer, text, expected):
-    """The safe direction of error: an odd sentence for the model, never a name that leaks."""
-    assert anon(anonymizer, text) == expected
+def test_names_that_are_also_words_are_masked_with_a_neutral_token(anonymizer, text, expected):
+    """Still the safe direction (the word never leaves as-is), but the token points to no one."""
+    safe = anonymizer.anonymize(text)
+    assert safe.text == expected
+    assert deanonymize(safe.text, safe) == text  # back to the word, not to a person
+    assert not safe.people
+
+
+def test_kvar_does_not_come_back_as_yael_bar():
+    """The case from the real run on 2026-10-15: "כבר" is כ + בר, and בר is a trainee's last name.
+    Before the fix, Claude's summary came back as "שלחתי אותו כיעל בר"."""
+    anonymizer = Anonymizer(Roster([Person(T, 14, "יעל", "בר"), Person(S, 1, "רונית", "שמעוני")]))
+    safe = anonymizer.anonymize("רונית: שלחתי אותו כבר אתמול. יעל בר תבדוק.")
+    assert safe.text == "[STAFF_1]: שלחתי אותו כ[NAME_1] אתמול. [TRAINEE_14] תבדוק."  # full name: her
+    answer = "[STAFF_1] שלחה את הלו״ז כ[NAME_1] אתמול, ו[TRAINEE_14] תבדוק."
+    assert deanonymize(answer, safe) == "רונית שמעוני שלחה את הלו״ז כבר אתמול, ויעל בר תבדוק."
+
+
+def test_a_common_word_name_is_the_person_when_the_context_says_who():
+    shahar = Person(S, 11, "שחר", "מימון")
+    roster = Roster([*PEOPLE, shahar])  # two people named שחר: trainee 3 and counselor 11
+    anonymizer = Anonymizer(roster)
+    assert anonymizer.anonymize("שחר, תתאם", known=[shahar]).text == "[STAFF_11], תתאם"  # he is at the meeting
+    assert anonymizer.anonymize("שחר סיפר", prefer=[PEOPLE[2]]).text == "[TRAINEE_3] סיפר"  # a talk with him
+    # both in context: still neutral, never a guess
+    assert anonymizer.anonymize("שחר", known=[shahar], prefer=[PEOPLE[2]]).text == "[NAME_1]"
+
+
+def test_a_full_name_with_a_common_word_is_always_the_person(anonymizer):
+    assert anon(anonymizer, "טל בר הגיעה, ושחר ששון גם") == "[TRAINEE_4] הגיעה, ו[TRAINEE_3] גם"
 
 
 @pytest.mark.parametrize("word", ["שחררו", "טלפון", "מטלטל", "בנייה", "ברזל", "הדרכה"])
@@ -220,7 +247,8 @@ def test_the_whole_demo_academy_leaves_no_name_behind():
 def test_a_whole_name_wins_over_prefix_plus_a_shorter_name():
     """מאור and אור are both common names. "מאור" is Maor, not מ + Or: the prefix match must be lazy."""
     anonymizer = Anonymizer(Roster([Person(T, 1, "מאור", "דהן"), Person(T, 2, "אור", "שלו")]))
-    assert anonymizer.anonymize("מאור ואור").text == "[TRAINEE_1] ו[TRAINEE_2]"
+    # אור is also a word ("light"), so alone it is neutral; the point is that מאור is not split
+    assert anonymizer.anonymize("מאור ואור").text == "[TRAINEE_1] ו[NAME_1]"
     assert anonymizer.anonymize("למאור").text == "ל[TRAINEE_1]"
 
 

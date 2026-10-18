@@ -125,7 +125,7 @@ class ProcessResult(BaseModel):
     meeting: StaffMeeting
     proposals: list[ProposedTask]
     issues: list[IssueOut] = Field(description="What validation corrected in the model's answer. Check these")
-    prompt: str = Field(description="The exact prompt version used, e.g. meeting_extract@v1")
+    prompt: str = Field(description="The exact prompt version used, e.g. meeting_extract@v2")
     attempts: int = Field(description="1, or 2 if the model had to correct its first answer")
     cost_usd: float | None
 

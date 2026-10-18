@@ -114,17 +114,16 @@ def test_claude_extracts_the_weekly_meeting():
     assert result.cost_usd is not None and result.cost_usd < 0.01
 
 
-def test_claude_does_not_give_a_task_to_someone_who_was_not_there():
+def test_claude_gives_a_task_to_an_absent_counselor_when_told_to():
+    """In SHORT, the manager says "ושירה תכין את חוברת ההדרכה לטיול, אני אעדכן אותה" and שירה
+    ([STAFF_4]) is absent. Since meeting_extract@v2 that task is hers, flagged for the manager.
+    (v1 forbade it, and this live test showed the rule was wrong: decision 2026-10-15.)"""
+    from pacer.ai.issues import IssueCode
     from pacer.demo.meetings import SHORT
 
-    import json
-
-    result, spy = _run_sample(SHORT)
-    raw = spy.received[-1]
-    owners = [task["owner"] for task in json.loads(raw[raw.find("{") : raw.rfind("}") + 1])["tasks"]]
-    # The prompt says: only participants own tasks. This checks CLAUDE follows it; even if it did
-    # not, validation would clear the owner (tested with fakes). שירה ([STAFF_4]) was absent.
-    assert "[STAFF_4]" not in owners, owners
+    result, _ = _run_sample(SHORT)
+    assert any(p.owner_id == 4 for p in result.proposals), [(p.owner_id, p.description) for p in result.proposals]
+    assert any(i.code is IssueCode.OWNER_ABSENT for i in result.issues)
     assert any(p.owner_id == 3 for p in result.proposals)  # עומר: check which זיו
     assert all("[STAFF_" not in p.description for p in result.proposals)
 

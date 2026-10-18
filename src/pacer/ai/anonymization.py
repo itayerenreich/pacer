@@ -17,6 +17,12 @@ Hebrew makes this harder than it looks:
 * Many names are also ordinary words: טל (dew), שחר (dawn), אגם (lake), בר. The policy is
   OVER-MASKING: when in doubt, replace. "בשחר" (at dawn) becomes "ב[TRAINEE_3]"; a slightly
   odd sentence for the model is far better than a name leaving the computer.
+* For the most common of those words (COMMON_WORD_NAMES: "כבר" is כ + בר!) a lone word is
+  still masked, but with a neutral [NAME_n] token that turns back into the WORD, not into a
+  person: otherwise "שלחתי אותו כבר" came back from the model as "שלחתי אותו כיעל בר", a
+  sentence wrongly tied to a real trainee (decision 2026-10-15). The exception is context: when
+  exactly one person in it (a meeting's participants, a talk's trainee and counselor) has that
+  name, the word is that person. A full name ("יעל בר") is always the person.
 * A first name alone may fit two people (two trainees named יעל). Full names are resolved to
   the right person; an ambiguous first name gets a neutral token ([NAME_1]) that points to no
   one, and the result reports it so a person can resolve it.
@@ -44,6 +50,11 @@ from pacer.repositories.interfaces import StaffRepo, TraineeRepo
 PREFIX_LETTERS = "ובכלמשה"
 _NOT_WORD_BEFORE = r"(?<!\w)"  # \w includes Hebrew letters in Python 3 regexes
 _NOT_WORD_AFTER = r"(?!\w)"
+# Names that are also everyday words. The test for this list is how common the WORD is in speech,
+# not how common the name is ("רון" is not here: as a word it is rare). Add to it when a case shows up.
+COMMON_WORD_NAMES = frozenset(
+    {"בר", "טל", "שחר", "בן", "אור", "אלה", "נתן", "שלו", "שני", "רעות", "ארז", "אלון", "חן", "גל", "דור"}
+)
 _TOKEN = re.compile(r"\[(?:TRAINEE|STAFF)_\d+\]|\[NAME_\d+\]")
 # Characters that are written in several ways, and the one form we compare by.
 _VARIANTS = {"'": "'׳’`´", '"': '"״“”', "-": "-־–"}
@@ -164,16 +175,24 @@ class Anonymizer:
                    (e.g. the participants of a meeting), so their tokens in the answer map back.
         prefer: who the text is about. When a name fits several people and exactly one of them
                 is preferred, it is that one (in a talk with Yael Mizrahi, "יעל" is her, not the
-                other Yael). Otherwise an ambiguous name still gets a neutral [NAME_n] token."""
+                other Yael). Otherwise an ambiguous name still gets a neutral [NAME_n] token.
+        A name that is also a common word (COMMON_WORD_NAMES) is a person only when exactly one
+        person in the context (known + prefer) has it; otherwise it gets a neutral [NAME_n]."""
         people: dict[str, Person] = {person.token: person for person in known}
         preferred = frozenset(prefer)
+        context = preferred | frozenset(people.values())
         unresolved: dict[str, str] = {}
         ambiguous_tokens: dict[str, str] = {}  # the same ambiguous word gets the same token
 
         def replace(match: re.Match) -> str:
             surface = " ".join(match["name"].split())
             candidates = self._roster.candidates(surface)
-            if len(candidates) > 1 and len(candidates & preferred) == 1:
+            if _normalize(surface) in COMMON_WORD_NAMES:
+                # A word as much as a name: it is a person only if the context says which one.
+                candidates = candidates & context
+                if len(candidates) != 1:
+                    candidates = frozenset()  # -> a neutral token that restores to the word
+            elif len(candidates) > 1 and len(candidates & preferred) == 1:
                 candidates = candidates & preferred
             if len(candidates) == 1:
                 (person,) = candidates

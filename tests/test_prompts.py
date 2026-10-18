@@ -86,3 +86,12 @@ def test_every_prompt_in_the_repo_loads():
     for name in names:
         for version in available_versions(name):
             assert load_prompt(name, version).ref == f"{name}@v{version}"
+
+
+def test_meeting_extract_v1_is_kept_and_the_pipeline_is_pinned_to_v2():
+    """v1 is never edited or deleted: old results still point to the exact prompt that made them."""
+    from pacer.ai.meeting_pipeline import MeetingPipeline
+
+    assert available_versions("meeting_extract") == [1, 2]
+    pipeline = MeetingPipeline(uow=None, router=None)  # type: ignore[arg-type]  # only the prompt is read
+    assert pipeline._prompt.ref == "meeting_extract@v2"
