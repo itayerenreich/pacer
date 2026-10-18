@@ -244,6 +244,7 @@ class KnowledgeSourceRow(Base):
     language: Mapped[str] = mapped_column(String(2))
     license: Mapped[str] = mapped_column(String(20))
     local_only: Mapped[bool] = mapped_column(Boolean)
+    origin_file: Mapped[str | None] = mapped_column(String(300), index=True)
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
 

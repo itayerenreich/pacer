@@ -19,6 +19,7 @@ model means nothing to another: the name stored with every embedding is Embeddin
 
 import logging
 import math
+import re
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -115,6 +116,22 @@ class LiteLLMEmbedder:
             round((time.perf_counter() - started) * 1000),
         )
         return vectors
+
+
+_NIQQUD = re.compile("[\u0591-\u05c7]")  # niqqud and cantillation marks (kept in the stored text)
+
+
+def for_embedding(text: str, *, title: str | None = None, section: str | None = None) -> str:
+    """The text as the embedding model sees it.
+
+    * Without niqqud: "חֲנֹךְ לַנַּעַר" and "חנוך לנער" are the same words; marks would make them
+      look different to the model. The stored chunk keeps them, for the citation.
+    * With a short header naming the work and the section: a chunk of the Rambam that never says
+      "Rambam" or "teacher" still carries that context into its vector ("contextual chunk header").
+    """
+    header = " · ".join(part for part in (title, section) if part)
+    body = _NIQQUD.sub("", text)
+    return f"{header}\n{body}" if header else body
 
 
 def check_vectors(vectors: list[list[float]], *, expected: int, dimensions: int) -> None:

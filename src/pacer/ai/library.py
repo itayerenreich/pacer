@@ -16,7 +16,7 @@ from dataclasses import dataclass
 
 from pacer.repositories import ScoredChunk, UnitOfWork
 
-from .embeddings import Embedder
+from .embeddings import Embedder, for_embedding
 from .routing import PrivacyViolation
 
 log = logging.getLogger(__name__)
@@ -40,14 +40,14 @@ def index_library(uow: UnitOfWork, embedder: Embedder, chunking: str, *, batch_s
         # 1. Read, in a short transaction: the next batch still missing.
         with uow() as repos:
             batch = repos.chunks.missing_embeddings(model, chunking)[:batch_size]
-            if not embedder.runs_locally:
-                local_only = {s.key for s in repos.sources.list_all() if s.local_only}
-                if any(chunk.source_id in local_only for chunk in batch):
-                    raise PrivacyViolation("A local_only source may only be embedded by a model on this computer")
+            sources = {s.key: s for s in repos.sources.list_all()}
         if not batch:
             break
-        # 2. The model, with NO transaction open.
-        vectors = embedder.embed_documents([chunk.text for chunk in batch])
+        if not embedder.runs_locally and any(sources[c.source_id].local_only for c in batch):
+            raise PrivacyViolation("A local_only source may only be embedded by a model on this computer")
+        # 2. The model, with NO transaction open. Each chunk with the name of its work, no niqqud.
+        texts = [for_embedding(c.text, title=sources[c.source_id].title, section=c.section) for c in batch]
+        vectors = embedder.embed_documents(texts)
         # 3. Write, in a short transaction. A chunk deleted meanwhile (re-chunked) is skipped.
         with uow() as repos:
             still_there = {chunk.key for chunk in repos.chunks.get_many([chunk.key for chunk in batch])}
@@ -76,6 +76,6 @@ def search_library(
     for_cloud_model: the hits will be sent to a model in the cloud, so local_only sources are left out."""
     if not question.strip():
         raise ValueError("The question is empty")
-    query = embedder.embed_query(question)  # no transaction open
+    query = embedder.embed_query(for_embedding(question))  # no transaction open
     with uow() as repos:
         return repos.chunks.search(embedder.spec.name, chunking, query, k=k, cloud_safe_only=for_cloud_model)

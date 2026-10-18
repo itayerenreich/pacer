@@ -96,11 +96,11 @@ class FakeTranscriber:
 
 
 class FakeEmbedder:
-    """Embeddings without a model: each word adds 1 to one of 64 positions (by a fixed hash).
+    """Embeddings without a model: each word adds 1 to one of 1024 positions (by a fixed hash).
     Texts that share words get close vectors, texts that share none are far apart. Deterministic,
     instant, and enough to test indexing and search. Records what it embedded."""
 
-    def __init__(self, name: str = "fake-embed", *, runs_locally: bool = True, dimensions: int = 64) -> None:
+    def __init__(self, name: str = "fake-embed", *, runs_locally: bool = True, dimensions: int = 1024) -> None:
         from pacer.ai.embeddings import EmbeddingSpec
 
         self.spec = EmbeddingSpec(name=name, litellm_model=f"fake/{name}", dimensions=dimensions)

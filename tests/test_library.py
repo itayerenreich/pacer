@@ -166,3 +166,10 @@ def test_hebrew_text_and_the_time_survive_the_round_trip(uow):
     with uow() as repos:
         assert repos.chunks.list_by_source(src.key, "fixed-300-50")[0].text == text
         assert repos.sources.get(src.key).added_at == datetime(2026, 10, 18, 15, 0, tzinfo=UTC)
+
+
+def test_a_classical_source_is_not_ranked_as_evidence():
+    """Decision 2026-10-18: the Rambam is a source of values, outside the empirical ladder."""
+    assert EvidenceLevel.TRADITION.rank == 0 and not EvidenceLevel.TRADITION.is_empirical
+    assert EvidenceLevel.TRADITION.label == "מקור ערכי-מסורתי"
+    assert all(level.is_empirical for level in EvidenceLevel if level is not EvidenceLevel.TRADITION)

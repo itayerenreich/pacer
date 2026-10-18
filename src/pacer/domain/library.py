@@ -23,26 +23,58 @@ class SourceKind(StrEnum):
     STUDY = "study"
     GUIDELINE = "guideline"  # a professional guideline (e.g. a ministry or an association)
     INTERNAL = "internal"  # the academy's own material
+    CLASSIC = "classic"  # a classical Jewish source: Bible and commentaries, Talmud, Rambam...
 
 
 class EvidenceLevel(StrEnum):
-    """How strong a source is, from strongest to weakest. Shown with every answer, and used to
-    prefer stronger sources when two chunks fit a question about equally well."""
+    """How strong a source is as EVIDENCE, from strongest to weakest. Shown with every answer, and
+    used to prefer stronger sources when two chunks fit a question about equally well.
+
+    TRADITION is outside that ladder on purpose (decision 2026-10-18): the Rambam is a source of
+    values and educational wisdom, not an empirical finding. It is shown as such ("מקור מסורתי"),
+    and on an empirical question a study comes first."""
 
     SYSTEMATIC = "systematic"  # meta-analyses and systematic reviews
     RESEARCH = "research"  # a single peer-reviewed study
     PROFESSIONAL = "professional"  # a professional book or guideline
     PRACTICE = "practice"  # experience: internal material, practitioner writing
+    TRADITION = "tradition"  # classical sources: values and wisdom, not empirical evidence
 
     @property
     def rank(self) -> int:
-        """4 for the strongest, 1 for the weakest."""
-        return len(EvidenceLevel) - list(EvidenceLevel).index(self)
+        """4 for the strongest evidence, 1 for the weakest, 0 for a source that is not evidence."""
+        return _RANK[self]
+
+    @property
+    def is_empirical(self) -> bool:
+        return self is not EvidenceLevel.TRADITION
+
+    @property
+    def label(self) -> str:
+        """How it is named to the staff, next to a citation."""
+        return _LABEL[self]
+
+
+_RANK = {
+    EvidenceLevel.SYSTEMATIC: 4,
+    EvidenceLevel.RESEARCH: 3,
+    EvidenceLevel.PROFESSIONAL: 2,
+    EvidenceLevel.PRACTICE: 1,
+    EvidenceLevel.TRADITION: 0,
+}
+_LABEL = {
+    EvidenceLevel.SYSTEMATIC: "סקירה שיטתית / מטא-אנליזה",
+    EvidenceLevel.RESEARCH: "מחקר",
+    EvidenceLevel.PROFESSIONAL: "ספרות מקצועית",
+    EvidenceLevel.PRACTICE: "ניסיון מעשי",
+    EvidenceLevel.TRADITION: "מקור ערכי-מסורתי",
+}
 
 
 class SourceLicense(StrEnum):
     OWNED_COPY = "owned_copy"  # a copy the academy owns: full text stays on this computer
     OPEN_ACCESS = "open_access"
+    PUBLIC_DOMAIN = "public_domain"  # e.g. classical texts
     INTERNAL = "internal"  # the academy's own document
 
 
@@ -58,6 +90,9 @@ class KnowledgeSource(Entity):
     license: SourceLicense
     # True: no part of this source may go to a model that does not run on this computer.
     local_only: bool = False
+    # The file it was imported from (a name, not a path). Importing that file again replaces
+    # every source that came from it.
+    origin_file: str | None = Field(default=None, max_length=300)
     added_at: AwareDatetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @property

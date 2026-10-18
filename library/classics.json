@@ -1,0 +1,51 @@
+{
+  "file": "classics.docx",
+  "split": "numbered",
+  "sources": [
+    {
+      "section": 1,
+      "title": "משלי כ\"ב, ו' ופירוש המלבי\"ם",
+      "author": "המלבי\"ם",
+      "kind": "classic",
+      "evidence_level": "tradition",
+      "license": "public_domain",
+      "summary_paragraphs": 1
+    },
+    {
+      "section": 2,
+      "title": "תלמוד בבלי, בבא בתרא כ\"א ע\"א, עם פירוש רש\"י",
+      "kind": "classic",
+      "evidence_level": "tradition",
+      "license": "public_domain",
+      "summary_paragraphs": 1
+    },
+    {
+      "section": 3,
+      "title": "משנה תורה, הלכות תלמוד תורה פרק ב'",
+      "author": "רמב\"ם",
+      "kind": "classic",
+      "evidence_level": "tradition",
+      "license": "public_domain",
+      "summary_paragraphs": 1
+    },
+    {
+      "section": 4,
+      "title": "איגרת הרמב\"ן",
+      "author": "רמב\"ן",
+      "kind": "classic",
+      "evidence_level": "tradition",
+      "license": "public_domain",
+      "summary_paragraphs": 1
+    },
+    {
+      "section": 5,
+      "title": "חובת התלמידים, הקדמה: שיח עם המלמדים ואבות הבנים",
+      "author": "האדמו\"ר מפיאסצנה",
+      "year": 1932,
+      "kind": "classic",
+      "evidence_level": "tradition",
+      "license": "public_domain",
+      "summary_paragraphs": 1
+    }
+  ]
+}
