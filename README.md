@@ -42,21 +42,26 @@ Some of the decisions behind it:
 - **Approval requests are a state machine** (`PENDING -> APPROVED / REJECTED`); approving a
   status change applies it in the same transaction.
 - **Privacy by design:** no ID numbers, addresses or medical data; sensitive answers live in a
-  separate personal file with stricter access; logs carry ids, never names.
+  separate personal file with stricter access; logs carry ids, never names. Who may not see a
+  record gets 404, exactly as if it did not exist, so ids cannot be probed. Notes about a trainee
+  whose file was closed are deleted after a retention period (`python -m pacer.maintenance`).
 - **Errors stay in their layer:** services raise business errors, and only the API maps them to
   401 / 403 / 404 / 409 / 422 (and 502 / 503 for AI steps, with fixed messages).
 - **Privacy is enforced in code, not in prompts.** Every AI task declares how sensitive its data
   is, and the router refuses to send personal data to a model that does not run locally. Names
   are replaced by tokens (`[TRAINEE_7]`) before any cloud model; the pipeline only accepts an
-  `AnonymizedText`, a type that only the anonymizer can create. Recordings are transcribed by a
-  local Whisper model and deleted once the transcript is saved.
+  `AnonymizedText`, a type that only the anonymizer can create. Hebrew names that are also
+  everyday words ("כבר" is כ + בר) become neutral tokens that turn back into the word. Sentences
+  about health are removed from a counselor's notes before anything is sent. Recordings are
+  transcribed by a local Whisper model and deleted once the transcript is saved.
 - **No model call inside a database transaction.** A pipeline reads in a short transaction,
   calls the model with none open, then writes in a short one that locks the row and re-checks
   its status, so two requests on the same meeting never save twice (tested with real threads
   against PostgreSQL).
 - **The model's answer is validated twice:** for shape (Pydantic, one correction attempt) and
-  for content against the database (is the owner a participant? is it this trainee's goal?).
-  Whatever cannot be used is cleared and reported, never guessed.
+  for content against the database (is the owner a staff member named in the meeting? is it this
+  trainee's goal?). Whatever cannot be used is cleared and reported, never guessed. Prompts are
+  versioned files (`meeting_extract@v2`); a used version is never edited.
 
 ## Stack
 
@@ -103,7 +108,7 @@ uv run pytest --run-llm -m llm       # against real models: costs a fraction of 
 - **AI tests** use a fake model that records what it was sent, so tests can check that no
   known name ever reached a cloud model, and that no transaction was open during the call.
 
-CI runs the full suite on every pull request.
+CI runs ruff, mypy and the full suite on every pull request.
 
 ## Status
 
@@ -111,6 +116,7 @@ CI runs the full suite on every pull request.
 |---|---|---|
 | 1. Data layer | domain models, PostgreSQL, migrations, repositories | done |
 | 2. Logic and API | services, roles, approvals, REST API, demo data, CI | done |
-| 3. AI core | LLM client, model routing, anonymization, meeting pipeline, talk summaries | core done |
-| 4. Knowledge and quality | RAG over education texts, evaluation set, model comparison | planned |
-| 5. Assistant and UI | tool-using agent, staff interface | planned |
+| 3. AI core | LLM client, model routing, anonymization, meeting pipeline, talk summaries | done |
+| 4. Knowledge and quality | a curated library, RAG with citations, evaluation set, open vs commercial models | next |
+| 5. Counselor coach | case guidance grounded only in the library, safety layer, hybrid local/cloud pipeline | planned |
+| 6. Assistant and UI | tool-using agent, staff interface, demo | planned |

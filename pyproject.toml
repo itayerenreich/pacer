@@ -1,7 +1,7 @@
 [project]
 name = "pacer"
 version = "0.1.0"
-description = "Add your description here"
+description = "A privacy-first assistant backend for the staff of a pre-military academy: trainees, goals, approvals, and AI that proposes while people decide"
 readme = "README.md"
 authors = [
     { name = "itayerenreich", email = "itayeren@gmail.com" }
