@@ -40,7 +40,8 @@ def check(name: str, make_client) -> bool:
     print(f"Answer:  {response.text}")
     print(f"Model:   {response.model}   prompt: {response.prompt_ref}")
     print(
-        f"Tokens:  {response.input_tokens} in, {response.output_tokens} out   cost: {cost}   time: {response.latency_ms} ms"
+        f"Tokens:  {response.input_tokens} in, {response.output_tokens} out   "
+        f"cost: {cost}   time: {response.latency_ms} ms"
     )
     if response.truncated:
         print("Warning: the answer was cut off at max_tokens")

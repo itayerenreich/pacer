@@ -1,5 +1,7 @@
 """Persistence for cohorts and groups (including the group_counselors link table)."""
 
+from collections.abc import Sequence
+
 from sqlalchemy import insert, select
 from sqlalchemy.orm import Session
 
@@ -56,7 +58,7 @@ class GroupRepository:
         return [self._to_domain(row) for row in rows]
 
     def _to_domain(self, row: GroupRow) -> Group:
-        counselor_ids = self._session.scalars(
+        counselor_ids: Sequence[int] = self._session.scalars(
             select(group_counselors.c.counselor_id)
             .where(group_counselors.c.group_id == row.id)
             .order_by(group_counselors.c.counselor_id)

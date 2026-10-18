@@ -130,7 +130,8 @@ class Router:
         # the client is the truth (e.g. someone pointed "local-small" at a cloud model).
         if client.runs_locally != self._models[route.model].runs_locally:
             raise RoutingError(
-                f"Model {route.model!r} is declared {'local' if self._models[route.model].runs_locally else 'cloud'}, but its client is not"
+                f"Model {route.model!r} is declared "
+                f"{'local' if self._models[route.model].runs_locally else 'cloud'}, but its client is not"
             )
         if not allowed(route.sensitivity, runs_locally=client.runs_locally):
             raise PrivacyViolation(

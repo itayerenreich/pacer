@@ -14,8 +14,9 @@ request; the original object never changes.
 from datetime import UTC, datetime
 from typing import Self
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, ConfigDict, Field, model_validator
 
+from .entity import Entity
 from .enums import ApprovalKind, ApprovalStatus, TraineeStatus
 from .errors import InvalidTransitionError
 
@@ -26,10 +27,9 @@ TRANSITIONS: dict[ApprovalStatus, frozenset[ApprovalStatus]] = {
 }
 
 
-class ApprovalRequest(BaseModel):
+class ApprovalRequest(Entity):
     model_config = ConfigDict(validate_assignment=True)
 
-    id: int | None = None
     kind: ApprovalKind
     trainee_id: int
     requested_by_id: int

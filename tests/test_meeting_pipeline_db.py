@@ -8,6 +8,7 @@ The fake tests prove the logic. These prove what only a database can show:
 * the summary and the proposals are committed together, or not at all.
 """
 
+import contextlib
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -247,10 +248,9 @@ def test_deciding_the_last_two_proposals_at_once_still_closes_the_meeting(academ
     real_count = ProposedTaskRepository.count_open
 
     def count_together(self, meeting_id):
-        try:
+        # the other request is waiting for the lock: it cannot be here, so the barrier breaks
+        with contextlib.suppress(threading.BrokenBarrierError):
             before_counting.wait()
-        except threading.BrokenBarrierError:
-            pass  # the other request is waiting for the lock: it cannot be here
         return real_count(self, meeting_id)
 
     monkeypatch.setattr(ProposedTaskRepository, "count_open", count_together)

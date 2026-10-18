@@ -10,7 +10,6 @@ approve or reject at http://127.0.0.1:8000/docs (X-Staff-Id: the counselor's id,
 """
 
 import argparse
-import sys
 from pathlib import Path
 
 from pacer.ai import LLMError
@@ -28,7 +27,7 @@ def dry_run(sample: SampleTalk) -> str:
         trainee, counselor = repos.trainees.get(sample.trainee_id), repos.staff.get(sample.counselor_id)
         if trainee is None or counselor is None:
             raise SystemExit("Load the demo first: uv run python -m pacer.demo --reset")
-        goals = repos.goals.list_by_trainee(trainee.id)
+        goals = repos.goals.list_by_trainee(trainee.key)
         roster = load_roster(repos.staff, repos.trainees)
     safe = anonymize_talk(roster, trainee, counselor, sample.held_on, goals, sample.notes)  # the pipeline's own path
     return "\n".join(
@@ -57,8 +56,8 @@ def send(sample: SampleTalk) -> str:
         talk = talk_service(repos).record_talk(counselor, sample.trainee_id, held_on=sample.held_on, notes=sample.notes)
         goals = {g.id: g.title for g in repos.goals.list_by_trainee(sample.trainee_id)}
 
-    result = TalkPipeline(lambda: repositories(engine), get_router()).summarize(counselor, talk.id)
-    lines = [f"# Talk {talk.id}", "", "## Summary", "", result.talk.summary, "", "## Proposals", ""]
+    result = TalkPipeline(lambda: repositories(engine), get_router()).summarize(counselor, talk.key)
+    lines = [f"# Talk {talk.id}", "", "## Summary", "", result.talk.summary or "", "", "## Proposals", ""]
     for p in result.proposals:
         if p.goal_id is not None:
             lines.append(f"- [{p.id}] progress: {goals[p.goal_id]} -> {p.progress}%  |  {p.text}")
@@ -93,4 +92,4 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

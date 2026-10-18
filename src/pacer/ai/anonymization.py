@@ -239,8 +239,8 @@ def tokens_in(text: str) -> list[str]:
 def load_roster(staff: StaffRepo, trainees: TraineeRepo) -> Roster:
     """Everyone whose name may appear: all staff, and all trainees in every status (a trainee
     who left is still a person whose name must not leave the computer)."""
-    people = [Person(PersonKind.STAFF, s.id, *_split_name(s.full_name)) for s in staff.list_all()]
-    people += [Person(PersonKind.TRAINEE, t.id, t.first_name, t.last_name) for t in trainees.list_all()]
+    people = [Person(PersonKind.STAFF, s.key, *_split_name(s.full_name)) for s in staff.list_all()]
+    people += [Person(PersonKind.TRAINEE, t.key, t.first_name, t.last_name) for t in trainees.list_all()]
     return Roster(people)
 
 

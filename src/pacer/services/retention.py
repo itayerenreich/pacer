@@ -43,9 +43,9 @@ def notes_past_retention(
     for trainee in trainees.list_all():
         if trainee.closed_at is None or trainee.closed_at >= cutoff:  # exactly the period: still kept
             continue
-        ids = [note.id for note in notes.list_by_trainee(trainee.id) if note.id is not None]
+        ids = [note.key for note in notes.list_by_trainee(trainee.key)]
         if ids:
-            plan[trainee.id] = ids  # type: ignore[index]  # a stored trainee has an id
+            plan[trainee.key] = ids
     return PurgePlan(plan)
 
 

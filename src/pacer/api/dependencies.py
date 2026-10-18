@@ -29,8 +29,8 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
 from pacer.ai.meeting_pipeline import MeetingPipeline
-from pacer.ai.talk_pipeline import TalkPipeline
 from pacer.ai.routing import Router, get_router
+from pacer.ai.talk_pipeline import TalkPipeline
 from pacer.ai.transcription import RecordingStore, Transcriber, WhisperTranscriber
 from pacer.config import get_ai_settings
 from pacer.domain import StaffMember

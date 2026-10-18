@@ -6,7 +6,6 @@ uv run python -m pacer.demo --reset    # deletes ALL data first (development onl
 
 import argparse
 import logging
-import sys
 
 from sqlalchemy import Engine, text
 
@@ -21,9 +20,9 @@ log = logging.getLogger("pacer.demo")  # not "__main__" when run with -m
 
 def database_is_empty(engine: Engine) -> bool:
     with engine.connect() as connection:
-        return connection.execute(
-            text(f"SELECT NOT EXISTS (SELECT 1 FROM {StaffMemberRow.__tablename__})")
-        ).scalar()
+        return bool(
+            connection.execute(text(f"SELECT NOT EXISTS (SELECT 1 FROM {StaffMemberRow.__tablename__})")).scalar()
+        )
 
 
 def reset_database(engine: Engine) -> None:
@@ -73,4 +72,4 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

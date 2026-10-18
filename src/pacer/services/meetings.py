@@ -150,7 +150,7 @@ class MeetingService:
                 source_meeting_id=meeting.id,
             )
         )
-        self._proposals.update(proposal.approve(actor.id, task.id))  # InvalidTransition if decided
+        self._proposals.update(proposal.approve(actor.key, task.key))  # InvalidTransition if decided
         log.info(
             "Proposal %s approved by staff %s -> task %s for staff %s",
             proposal_id,
@@ -158,13 +158,13 @@ class MeetingService:
             task.id,
             task.owner_id,
         )
-        self._close_if_done(meeting.id)
+        self._close_if_done(meeting.key)
         return task
 
     def reject_proposal(self, actor: StaffMember, proposal_id: int) -> ProposedTask:
         require(is_manager(actor), "reject proposed tasks")
         proposal, _ = self._decidable(proposal_id)
-        rejected = self._proposals.update(proposal.reject(actor.id))
+        rejected = self._proposals.update(proposal.reject(actor.key))
         log.info("Proposal %s rejected by staff %s", proposal_id, actor.id)
         self._close_if_done(proposal.meeting_id)
         return rejected
@@ -180,13 +180,13 @@ class MeetingService:
         """
         proposal = found(self._proposals.get(proposal_id), "Proposed task", proposal_id)
         meeting = found(self._meetings.lock(proposal.meeting_id), "Meeting", proposal.meeting_id)
-        proposal = self._proposals.lock(proposal_id)  # re-read now that no one else can decide
+        proposal = found(self._proposals.lock(proposal_id), "Proposed task", proposal_id)  # re-read, now locked
         # Still open? Checked BEFORE anything is created.
         require_transition(PROPOSAL_TRANSITIONS, proposal.status, ProposalStatus.APPROVED, "proposal")
         return proposal, meeting
 
     def _close_if_done(self, meeting_id: int) -> None:
-        meeting = self._meetings.get(meeting_id)
+        meeting = found(self._meetings.get(meeting_id), "Meeting", meeting_id)
         if meeting.status is MeetingStatus.PENDING_APPROVAL and self._proposals.count_open(meeting_id) == 0:
             self._meetings.update(meeting.advance(MeetingStatus.APPROVED))
             log.info("Meeting %s: every proposal decided", meeting_id)
@@ -197,7 +197,7 @@ class TaskService:
         self._tasks = tasks
 
     def my_tasks(self, actor: StaffMember) -> list[Task]:
-        return self._tasks.list_by_owner(actor.id)
+        return self._tasks.list_by_owner(actor.key)
 
     def all_tasks(self, actor: StaffMember) -> list[Task]:
         require(is_manager(actor), "view everyone's tasks")

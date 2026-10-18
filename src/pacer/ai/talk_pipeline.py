@@ -42,6 +42,7 @@ from pacer.domain import (
 from pacer.domain.talk import NOTE_MAX_LENGTH, REASON_MAX_LENGTH
 from pacer.repositories import Repos, UnitOfWork
 from pacer.services import GoalService, RuleViolationError, TalkDraft, TalkService
+from pacer.services.errors import found
 
 from .anonymization import (
     AnonymizationError,
@@ -124,7 +125,7 @@ def anonymize_talk(
 ) -> AnonymizedText:
     """The whole message, anonymized as one text. The talk's trainee and counselor are preferred
     when a name is ambiguous: in their own talk, it is most likely them."""
-    about = [roster.find(PersonKind.TRAINEE, trainee.id), roster.find(PersonKind.STAFF, counselor.id)]
+    about = [roster.find(PersonKind.TRAINEE, trainee.key), roster.find(PersonKind.STAFF, counselor.key)]
     return Anonymizer(roster).anonymize(
         talk_document(trainee, counselor, held_on, goals, notes), prefer=[p for p in about if p is not None]
     )
@@ -203,31 +204,33 @@ def validate_talk(extraction: TalkExtraction, source: AnonymizedText, *, goals: 
             issues.append(Issue(IssueCode.GOAL_CLOSED, number, f"goal {goal.id} was dropped; dropped", "progress"))
             continue
         if suggestion.progress == goal.progress:
-            issues.append(Issue(IssueCode.NO_CHANGE, number, f"goal {goal.id} is already at {goal.progress}%", "progress"))
+            detail = f"goal {goal.id} is already at {goal.progress}%"
+            issues.append(Issue(IssueCode.NO_CHANGE, number, detail, "progress"))
             continue
         if goal.id in seen_goals:
             issues.append(Issue(IssueCode.DUPLICATE, number, f"goal {goal.id} twice; kept the first", "progress"))
             continue
         if is_sensitive(suggestion.reason):  # the reason would stay forever in the goal's history
-            issues.append(Issue(IssueCode.SENSITIVE_TEXT, number, f"goal {goal.id}: health or diagnosis; not kept", "progress"))
+            detail = f"goal {goal.id}: health or diagnosis; not kept"
+            issues.append(Issue(IssueCode.SENSITIVE_TEXT, number, detail, "progress"))
             continue
-        seen_goals.add(goal.id)
+        seen_goals.add(goal.key)
         reason = restore(suggestion.reason, number, "progress", REASON_MAX_LENGTH)
         drafts.append(
             TalkDraft(kind=TalkProposalKind.PROGRESS, goal_id=goal.id, progress=suggestion.progress, text=reason)
         )
 
     seen_notes: set[str] = set()
-    for number, suggestion in enumerate(extraction.notes, start=1):
-        if is_sensitive(suggestion.text):  # the detail says nothing about what the note said
+    for number, note in enumerate(extraction.notes, start=1):
+        if is_sensitive(note.text):  # the detail says nothing about what the note said
             issues.append(Issue(IssueCode.SENSITIVE_TEXT, number, "health or diagnosis; not kept", "notes"))
             continue
-        text = restore(suggestion.text, number, "notes", NOTE_MAX_LENGTH)
+        text = restore(note.text, number, "notes", NOTE_MAX_LENGTH)
         if text.casefold() in seen_notes:
             issues.append(Issue(IssueCode.DUPLICATE, number, "same note as an earlier one; dropped", "notes"))
             continue
         seen_notes.add(text.casefold())
-        drafts.append(TalkDraft(kind=TalkProposalKind.NOTE, note_kind=suggestion.kind, text=text))
+        drafts.append(TalkDraft(kind=TalkProposalKind.NOTE, note_kind=note.kind, text=text))
 
     return ValidatedTalk(summary=summary, drafts=drafts, issues=issues)
 
@@ -262,8 +265,8 @@ class TalkPipeline:
         with self._uow() as repos:
             talk, trainee = talk_service(repos).talk_to_summarize(actor, talk_id)
             _require_status(talk, TalkStatus.RECORDED)
-            counselor = repos.staff.get(talk.counselor_id)
-            goals = repos.goals.list_by_trainee(trainee.id)
+            counselor = found(repos.staff.get(talk.counselor_id), "Staff member", talk.counselor_id)
+            goals = repos.goals.list_by_trainee(trainee.key)
             roster = load_roster(repos.staff, repos.trainees)
 
         # 2. Sensitive sentences out, then one document, anonymized as a whole. Only safe.text goes
@@ -288,7 +291,7 @@ class TalkPipeline:
                 current.advance(TalkStatus.SUMMARIZED, anonymized_notes=safe.text, summary=validated.summary)
             )
             proposals = talk_service(repos).submit_proposals(talk_id, validated.drafts)
-            final = repos.talks.get(talk_id)
+            final = found(repos.talks.get(talk_id), "Talk", talk_id)
 
         log.info(
             "Talk %s summarized: prompt=%s attempts=%s proposals=%s issues=%s removed_sentences=%s cost=%s",

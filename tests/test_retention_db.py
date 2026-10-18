@@ -34,9 +34,8 @@ def test_the_demo_trainee_who_left_has_a_closed_at(engine, academy):
 
 
 def test_the_database_rejects_a_closed_status_without_a_date(engine, academy):
-    with pytest.raises(IntegrityError, match="ck_trainees_closed_at_matches_status"):
-        with engine.begin() as connection:
-            connection.execute(text("UPDATE trainees SET status = 'left', closed_at = NULL WHERE id = 1"))
+    with pytest.raises(IntegrityError, match="ck_trainees_closed_at_matches_status"), engine.begin() as connection:
+        connection.execute(text("UPDATE trainees SET status = 'left', closed_at = NULL WHERE id = 1"))
 
 
 def test_purge_notes_shows_first_and_deletes_only_with_yes(engine, academy, capsys):

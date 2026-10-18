@@ -3,16 +3,16 @@
 from datetime import UTC, date, datetime
 from typing import Self
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, ConfigDict, Field, model_validator
 
+from .entity import Entity
 from .enums import GoalCategory, GoalStatus
 from .errors import DomainRuleError
 
 
-class Goal(BaseModel):
+class Goal(Entity):
     model_config = ConfigDict(validate_assignment=True)
 
-    id: int | None = None
     trainee_id: int
     title: str = Field(min_length=3, max_length=200)
     description: str | None = None
@@ -46,10 +46,9 @@ class Goal(BaseModel):
         return self.model_validate({**self.model_dump(), "progress": progress, "status": status})
 
 
-class GoalUpdate(BaseModel):
+class GoalUpdate(Entity):
     model_config = ConfigDict(validate_assignment=True)
 
-    id: int | None = None
     goal_id: int
     author_id: int
     progress: int = Field(ge=0, le=100)

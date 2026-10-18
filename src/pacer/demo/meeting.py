@@ -14,12 +14,11 @@ Markdown file: open it in VS Code (Ctrl+Shift+V) to read it properly. data/ is o
 """
 
 import argparse
-import sys
 from pathlib import Path
 
+from pacer.ai import LLMError
 from pacer.ai.anonymization import load_roster
 from pacer.ai.meeting_pipeline import MeetingPipeline, anonymize_meeting, extraction_message
-from pacer.ai import LLMError
 from pacer.ai.routing import AITask, get_router
 from pacer.logging_config import configure_logging, use_utf8_console
 from pacer.repositories import get_engine, repositories
@@ -33,7 +32,7 @@ MANAGER_ID = 1
 def dry_run(sample: SampleMeeting) -> str:
     with repositories(get_engine()) as repos:
         roster = load_roster(repos.staff, repos.trainees)
-        participants = [repos.staff.get(i) for i in sample.participant_ids]
+        participants = [s for i in sample.participant_ids if (s := repos.staff.get(i)) is not None]
     if not roster.people:
         raise SystemExit("The database is empty. Load the demo first: uv run python -m pacer.demo --reset")
     safe = anonymize_meeting(roster, sample.transcript, participants)  # the pipeline's own code path
@@ -70,9 +69,9 @@ def send(sample: SampleMeeting) -> str:
         )
         names = {s.id: s.full_name for s in repos.staff.list_all()}
 
-    result = MeetingPipeline(lambda: repositories(engine), get_router()).process(manager, meeting.id)
+    result = MeetingPipeline(lambda: repositories(engine), get_router()).process(manager, meeting.key)
 
-    lines = [f"# {sample.title} (meeting {meeting.id})", "", "## Summary", "", result.meeting.summary, ""]
+    lines = [f"# {sample.title} (meeting {meeting.id})", "", "## Summary", "", result.meeting.summary or "", ""]
     lines += ["## Proposed tasks (waiting for the manager)", ""]
     for p in result.proposals:
         owner = names.get(p.owner_id, "(no owner: choose one before approving)")
@@ -107,4 +106,4 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()

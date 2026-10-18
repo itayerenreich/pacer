@@ -3,16 +3,16 @@
 from datetime import UTC, datetime
 from typing import Self
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, ConfigDict, Field, model_validator
 
+from .entity import Entity
 from .enums import TraineeStatus
 from .errors import DomainRuleError
 
 
-class Trainee(BaseModel):
+class Trainee(Entity):
     model_config = ConfigDict(validate_assignment=True)
 
-    id: int | None = None
     first_name: str = Field(min_length=1, max_length=50)
     last_name: str = Field(min_length=1, max_length=50)
     cohort_id: int
@@ -61,12 +61,11 @@ class Trainee(BaseModel):
 CLOSED_STATUSES = frozenset({TraineeStatus.LEFT, TraineeStatus.GRADUATED})
 
 
-class PersonalFile(BaseModel):
+class PersonalFile(Entity):
     """Sensitive data. Visible to managers, or to counselors with approval."""
 
     model_config = ConfigDict(validate_assignment=True)
 
-    id: int | None = None
     trainee_id: int
     intake_answers: dict[str, str] = Field(default_factory=dict, repr=False)
     background_notes: str | None = Field(default=None, repr=False)

@@ -1,5 +1,6 @@
 """Talks, talk proposals and notes against PostgreSQL: the fourth migration, and the counselor flow."""
 
+import contextlib
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
@@ -140,10 +141,8 @@ def test_deciding_the_last_two_proposals_at_once_still_closes_the_talk(academy, 
     real_count = TalkProposalRepository.count_open
 
     def count_together(self, talk_id):
-        try:
+        with contextlib.suppress(threading.BrokenBarrierError):
             before_counting.wait()
-        except threading.BrokenBarrierError:
-            pass
         return real_count(self, talk_id)
 
     monkeypatch.setattr(TalkProposalRepository, "count_open", count_together)

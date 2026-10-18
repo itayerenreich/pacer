@@ -26,6 +26,7 @@ from pacer.domain import (
     TalkStatus,
     Trainee,
     TraineeNote,
+    present,
 )
 from pacer.domain.state import require_transition
 from pacer.domain.talk import (
@@ -140,35 +141,39 @@ class TalkService:
             proposal = proposal.edited(**edits.model_dump(exclude_unset=True))
 
         if proposal.kind is TalkProposalKind.PROGRESS:
-            goal = found(self._goals.get(proposal.goal_id), "Goal", proposal.goal_id)
+            goal_id = present(proposal.goal_id, "a goal on a progress proposal")
+            goal = found(self._goals.get(goal_id), "Goal", goal_id)
             if goal.trainee_id != talk.trainee_id:  # checked by the pipeline too; never trust one check
                 raise RuleViolationError(f"Goal {goal.id} is not a goal of this talk's trainee")
-            update = self._goal_service.record_progress(actor, goal.id, proposal.progress, proposal.text)
-            approved = proposal.approve(actor.id, goal_update_id=update.id)
+            progress = present(proposal.progress, "a progress value on a progress proposal")
+            text = present(proposal.text, "the text of an open proposal")
+            update = self._goal_service.record_progress(actor, goal.key, progress, text)
+            approved = proposal.approve(actor.key, goal_update_id=update.key)
         else:
-            if len(proposal.text) > NOTE_MAX_LENGTH:
+            text = present(proposal.text, "the text of an open proposal")
+            if len(text) > NOTE_MAX_LENGTH:
                 raise RuleViolationError(f"A note is at most {NOTE_MAX_LENGTH} characters; shorten it first")
             note = self._notes.add(
                 TraineeNote(
                     trainee_id=talk.trainee_id,
-                    kind=proposal.note_kind,
-                    text=proposal.text,
-                    author_id=actor.id,  # the counselor who approved it owns it, not the model
-                    source_talk_id=talk.id,
+                    kind=present(proposal.note_kind, "a note kind on a note proposal"),
+                    text=text,
+                    author_id=actor.key,  # the counselor who approved it owns it, not the model
+                    source_talk_id=talk.key,
                 )
             )
-            approved = proposal.approve(actor.id, note_id=note.id)
+            approved = proposal.approve(actor.key, note_id=note.key)
 
         self._proposals.update(approved)
         log.info("Talk proposal %s (%s) approved by staff %s", proposal_id, proposal.kind, actor.id)
-        self._close_if_done(talk.id)
+        self._close_if_done(talk.key)
         return approved
 
     def reject_proposal(self, actor: StaffMember, proposal_id: int) -> TalkProposal:
         proposal, talk = self._decidable(actor, proposal_id)
-        rejected = self._proposals.update(proposal.reject(actor.id))  # its text is not kept
+        rejected = self._proposals.update(proposal.reject(actor.key))  # its text is not kept
         log.info("Talk proposal %s rejected by staff %s", proposal_id, actor.id)
-        self._close_if_done(talk.id)
+        self._close_if_done(talk.key)
         return rejected
 
     # --- notes: the trainee's long-term memory ------------------------------------------------------
@@ -205,14 +210,15 @@ class TalkService:
         talk = found(self._talks.get(proposal.talk_id), "Talk", proposal.talk_id)
         trainee = self._open_trainee(actor, talk.trainee_id, what="Talk proposal", object_id=proposal_id)
         require(can_edit_goals(actor, trainee), "decide on proposals about this trainee")
-        talk = self._talks.lock(talk.id)
-        proposal = self._proposals.lock(proposal_id)  # re-read now that no one else can decide
+        talk = found(self._talks.lock(talk.key), "Talk", talk.key)
+        # re-read now that no one else can decide
+        proposal = found(self._proposals.lock(proposal_id), "Talk proposal", proposal_id)
         # Still open? Checked BEFORE anything is created.
         require_transition(TALK_PROPOSAL_TRANSITIONS, proposal.status, ProposalStatus.APPROVED, "proposal")
         return proposal, talk
 
     def _close_if_done(self, talk_id: int) -> None:
-        talk = self._talks.get(talk_id)
+        talk = found(self._talks.get(talk_id), "Talk", talk_id)
         if talk.status is TalkStatus.SUMMARIZED and self._proposals.count_open(talk_id) == 0:
             self._talks.update(talk.advance(TalkStatus.REVIEWED))
             log.info("Talk %s: every proposal decided", talk_id)

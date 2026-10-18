@@ -34,6 +34,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "httpx2>=2.13.1",
+    "mypy==1.18.2",
     "pytest>=9.1.1",
     "testcontainers[postgres]>=4.15.0",
 ]
@@ -52,3 +53,29 @@ filterwarnings = [
 # Supply-chain cooldown for the optional audio stack: never resolve a release younger than about
 # two weeks (a compromised release is usually caught and pulled within days; see the LiteLLM pin).
 exclude-newer-package = { ctranslate2 = "2026-09-30T00:00:00Z", onnxruntime = "2026-09-30T00:00:00Z", numpy = "2026-09-30T00:00:00Z", av = "2026-09-30T00:00:00Z", faster-whisper = "2026-09-30T00:00:00Z" }
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+# pyflakes, pycodestyle errors, import order, bugbear, pyupgrade, simplifications
+select = ["F", "E", "W", "I", "B", "UP", "SIM"]
+ignore = [
+    "SIM905",  # a word list written as one string and .split() reads better than 50 quoted words
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]  # long Hebrew sample sentences and parametrize tables read better on one line
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src"]
+plugins = ["pydantic.mypy"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["litellm.*", "faster_whisper.*", "testcontainers.*"]
+ignore_missing_imports = true

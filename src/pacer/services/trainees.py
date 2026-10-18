@@ -66,7 +66,7 @@ class TraineeService:
             approved = self._approvals.exists_with_status(
                 kind=ApprovalKind.VIEW_PERSONAL_FILE,
                 trainee_id=trainee_id,
-                requested_by_id=actor.id,
+                requested_by_id=actor.key,
                 status=ApprovalStatus.APPROVED,
             )
             require(approved, "view this personal file without manager approval")
