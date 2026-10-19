@@ -10,10 +10,11 @@ sample (the plan: Itay checks some by hand). What the judge receives is anonymiz
 goes to a cloud model; the library passages are not personal, and go as they are.
 """
 
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from pacer.ai.anonymization import Anonymizer, Person
 from pacer.ai.llm_client import LLMClient
@@ -57,7 +58,15 @@ class NoteMatch(BaseModel):
 
     expected: int = Field(ge=1)
     note: int | None = Field(ge=1)
-    why: str = Field(max_length=400)
+    why: str = Field(max_length=1000)
+
+    @field_validator("expected", "note", mode="before")
+    @classmethod
+    def number_of_label(cls, value: object) -> object:
+        """The notes are shown as E1, N2: a judge may answer with the label. "N2" means 2."""
+        if isinstance(value, str) and re.fullmatch(r"\s*[ENen]?\s*\d+\s*", value):
+            return int(re.sub(r"\D", "", value))
+        return value
 
 
 class NotesJudgment(BaseModel):

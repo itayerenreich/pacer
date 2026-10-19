@@ -377,3 +377,18 @@ def test_the_retry_library_litellm_needs_is_installed():
     import importlib
 
     importlib.import_module("tenacity")
+
+
+def test_the_notes_judge_may_answer_with_the_labels_it_was_shown(repos):
+    """talks@v1 T06: the judge answered "N2" instead of 2, twice, and the case failed."""
+    answer = {
+        "matches": [{"expected": "E1", "note": "N1", "why": "אותו דבר"}, {"expected": 2, "note": None, "why": "-"}]
+    }
+    client = FakeLLMClient(answers=[json.dumps(answer, ensure_ascii=False)], runs_locally=False)
+    grade = grade_notes(
+        client,
+        Anonymizer(load_roster(repos.staff, repos.trainees)),
+        expected=[(NoteKind.WORKED, "שעון מעורר"), (NoteKind.FOLLOW_UP, "לחזור לשיחה")],
+        proposed=[(NoteKind.WORKED, "שעון מעורר רחוק מהמיטה")],
+    )
+    assert grade.matches == [0, None]

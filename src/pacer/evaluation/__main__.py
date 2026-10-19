@@ -119,6 +119,8 @@ def masking() -> str:
 def _failure(case_id: str, error: Exception) -> str:
     """One line for a case that failed. The cause's message too: it says what the provider refused."""
     cause = f" ({type(error.__cause__).__name__}: {error.__cause__})" if error.__cause__ else ""
+    if isinstance(error, StructuredOutputError):  # what was wrong with the answers, attempt by attempt
+        cause += " [" + " | ".join(error.reasons)[:400] + "]"
     print(f"  ✗ {case_id} failed: {type(error).__name__}: {error}{cause}", flush=True)
     return f"{case_id}: {type(error).__name__}: {str(error)[:200]}{cause[:300]}"
 
