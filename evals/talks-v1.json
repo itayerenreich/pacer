@@ -1,33 +1,33 @@
 {
   "name": "talks",
   "version": 1,
-  "about": "Invented personal talks with trainees of the demo academy (python -m pacer.demo, seed 2026). Written by Claude on 2026-10-19 to measure the talk pipeline, and the open question from stage 3: what anonymization does to names that are also everyday words. Every such word in the notes is marked with what it means here. Waits for Itay's review. Frozen once results are reported: changes go into v2.",
+  "about": "Invented personal talks with trainees of the demo academy (python -m pacer.demo, seed 2026). Written by Claude on 2026-10-19 to measure the talk pipeline, and the open question from stage 3: what anonymization does to names that are also everyday words. Every such word in the notes is marked with what it means here. Waits for Itay's review. Frozen once results are reported: changes go into v2. Fixed before any result (2026-10-19): T01 had a trainee who left the academy; T03 expected progress on a dropped goal.",
   "cases": [
     {
       "id": "T01",
       "tests": "a name that is also a word (אגם, a lake) in the trainee's own talk: is the word tied to her?",
-      "trainee": "אגם אוחיון",
-      "counselor": "נועה לוי",
+      "trainee": "אגם לנדאו",
+      "counselor": "איתי ביטון",
       "held_on": "2026-10-14",
-      "notes": "שיחה אישית עם אגם.\nהשבוע אגם קמה בזמן בארבעה בקרים מתוך חמישה, בלי שאף אחד העיר אותה. בשבוע שעבר זה קרה רק פעם אחת. מה שעזר: היא שמה את השעון המעורר בצד השני של החדר.\nהיא כבר בחרה שלושה מסלולי שירות מועדפים ושלחה את הרשימה לרכזת.\nבטיול לאגם בשבת היא התנדבה לסחוב את הציוד של הקבוצה, וזה הפתיע אותי לטובה.\nמה שפחות עבד: כשניסיתי לדבר איתה על הוויכוח עם שקד היא התחמקה. סיכמנו שנחזור לזה בשיחה הבאה.",
+      "notes": "שיחה אישית עם אגם.\nהשבוע אגם דיברה בשיחת הקבוצה פעמיים, ופעם אחת אפילו הציעה רעיון לפעילות. עד עכשיו היא כמעט לא דיברה בשיחות.\nמה שעזר: ביקשתי ממנה מראש להכין נקודה אחת לשיחה, והיא הגיעה מוכנה.\nהיא כבר מתאמנת לקראת יום המא\"ה שלוש פעמים בשבוע, ובמבחן הכושר האחרון שיפרה את התוצאה.\nבטיול לאגם בשבת היא התנדבה לסחוב את הציוד של הקבוצה, וזה הפתיע אותי לטובה.\nמה שפחות עבד: כשניסיתי לדבר איתה על הוויכוח עם שקד היא התחמקה. סיכמנו שנחזור לזה בשיחה הבאה.",
       "progress": [
         {
-          "goal": "לקום בזמן בכל בוקר בלי תזכורת",
-          "low": 40,
-          "high": 75,
+          "goal": "להשתתף באופן פעיל בשיחות הקבוצה",
+          "low": 20,
+          "high": 45,
           "required": true
         },
         {
-          "goal": "ללמוד על מסלולי השירות ולבחור שלושה מועדפים",
-          "low": 95,
-          "high": 100,
+          "goal": "לשפר כושר לקראת יום המא״ה",
+          "low": 55,
+          "high": 75,
           "required": true
         }
       ],
       "expected_notes": [
         {
           "kind": "worked",
-          "gist": "שעון מעורר בצד השני של החדר עזר לה לקום בזמן"
+          "gist": "להכין מראש נקודה אחת לשיחת הקבוצה עזר לה להשתתף"
         },
         {
           "kind": "follow_up",
@@ -38,12 +38,12 @@
         {
           "word": "אגם",
           "occurrence": 1,
-          "means": "trainee:אגם אוחיון"
+          "means": "trainee:אגם לנדאו"
         },
         {
           "word": "אגם",
           "occurrence": 2,
-          "means": "trainee:אגם אוחיון"
+          "means": "trainee:אגם לנדאו"
         },
         {
           "word": "כבר",
@@ -127,12 +127,6 @@
         {
           "goal": "להגיע ל-15 עליות מתח",
           "low": 40,
-          "high": 60,
-          "required": true
-        },
-        {
-          "goal": "להכיר לעומק כל אחד מחברי הקבוצה",
-          "low": 30,
           "high": 60,
           "required": true
         }

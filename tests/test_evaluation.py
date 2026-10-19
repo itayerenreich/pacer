@@ -95,17 +95,15 @@ def test_every_talk_case_fits_the_demo_academy(repos):
     talks = load_talk_set(TALK_SET)
     assert talks.ref == "talks@v1" and len(talks.cases) >= 8
     for c in talks.cases:
-        resolved = resolve(c, repos.staff, repos.trainees, repos.goals)
-        group = repos.groups.get(resolved.trainee.group_id)
-        assert resolved.counselor.key in group.counselor_ids, f"{c.id}: not this trainee's counselor"
+        resolve(c, repos.staff, repos.trainees, repos.goals, repos.groups)  # raises CaseError if not
 
 
 def talk(**changes) -> TalkCase:
     data = {
         "id": "T01",
         "tests": "test",
-        "trainee": "אגם אוחיון",
-        "counselor": "נועה לוי",
+        "trainee": "אגם לנדאו",
+        "counselor": "איתי ביטון",
         "held_on": "2026-10-14",
         "notes": "שיחה עם אגם. בטיול לאגם היא סחבה ציוד.",
         "mentions": [{"word": "לאגם", "means": "word"}],
@@ -126,6 +124,16 @@ def test_a_mention_must_be_in_the_notes_and_a_case_must_fit_the_academy(repos):
         resolve(
             talk(mentions=[{"word": "אגם", "means": "trainee:אגם מהשכונה"}]), repos.staff, repos.trainees, repos.goals
         )
+    goals = repos.goals
+    with pytest.raises(CaseError, match="is left, not active"):  # אגם אוחיון left the academy
+        resolve(talk(trainee="אגם אוחיון", counselor="נועה לוי"), repos.staff, repos.trainees, goals, repos.groups)
+    with pytest.raises(CaseError, match="not a counselor of"):
+        resolve(talk(counselor="נועה לוי"), repos.staff, repos.trainees, goals, repos.groups)
+    dropped = {"goal": "להכיר לעומק כל אחד מחברי הקבוצה", "low": 30, "high": 60}  # רעות קליין's, dropped
+    with pytest.raises(CaseError, match="is dropped: a talk cannot move it"):
+        resolve(
+            talk(trainee="רעות קליין", counselor="נועה לוי", progress=[dropped]), repos.staff, repos.trainees, goals
+        )
     with pytest.raises(ValidationError, match="low 50 is above high 40"):
         talk(progress=[{"goal": "x", "low": 50, "high": 40}])
 
@@ -136,17 +144,17 @@ def test_a_mention_must_be_in_the_notes_and_a_case_must_fit_the_academy(repos):
 @pytest.mark.parametrize(
     ("means", "sent_as", "expected"),
     [
-        ("trainee:x", "[TRAINEE_2]", Outcome.PERSON_RIGHT),
+        ("trainee:x", "[TRAINEE_35]", Outcome.PERSON_RIGHT),
         ("trainee:x", "ו[TRAINEE_9]", Outcome.PERSON_WRONG),
         ("trainee:x", "[NAME_1]", Outcome.PERSON_NEUTRAL),
         ("trainee:x", "אגם", Outcome.PERSON_LEAKED),
         ("word", "לאגם", Outcome.WORD_KEPT),
         ("word", "כ[NAME_1]", Outcome.WORD_NEUTRAL),
-        ("word", "ל[TRAINEE_2]", Outcome.WORD_AS_PERSON),
+        ("word", "ל[TRAINEE_35]", Outcome.WORD_AS_PERSON),
     ],
 )
 def test_each_outcome(means, sent_as, expected):
-    assert classify(Mention(word="אגם", means=means), sent_as, "[TRAINEE_2]") is expected
+    assert classify(Mention(word="אגם", means=means), sent_as, "[TRAINEE_35]") is expected
 
 
 def test_a_word_tied_to_the_trainee_and_a_full_name_are_found_in_the_sent_text(repos, roster):
@@ -154,23 +162,23 @@ def test_a_word_tied_to_the_trainee_and_a_full_name_are_found_in_the_sent_text(r
     c = talk(
         notes=notes,
         mentions=[
-            {"word": "אגם", "means": "trainee:אגם אוחיון"},
+            {"word": "אגם", "means": "trainee:אגם לנדאו"},
             {"word": "איתן", "means": "trainee:איתן רוזן"},  # a full name: two words, one token
             {"word": "לאגם", "means": "word"},
         ],
     )
     results = measure(resolve(c, repos.staff, repos.trainees, repos.goals), roster)
     assert [(r.sent_as, r.outcome) for r in results] == [
-        ("[TRAINEE_2]", Outcome.PERSON_RIGHT),
+        ("[TRAINEE_35]", Outcome.PERSON_RIGHT),
         ("[TRAINEE_30]", Outcome.PERSON_RIGHT),
-        ("ל[TRAINEE_2]", Outcome.WORD_AS_PERSON),  # the lake became the trainee: what this measures
+        ("ל[TRAINEE_35]", Outcome.WORD_AS_PERSON),  # the lake became the trainee: what this measures
     ]
 
 
 def test_a_marked_word_in_a_health_sentence_is_refused(repos, roster):
     c = talk(
         notes="שיחה עם אגם. אגם הלכה לרופא בגלל כאבי ראש.",
-        mentions=[{"word": "אגם", "occurrence": 2, "means": "trainee:אגם אוחיון"}],
+        mentions=[{"word": "אגם", "occurrence": 2, "means": "trainee:אגם לנדאו"}],
     )
     with pytest.raises(ValueError, match="removed before sending"):
         measure(resolve(c, repos.staff, repos.trainees, repos.goals), roster)
@@ -214,7 +222,7 @@ def test_two_names_side_by_side_each_map_to_their_own_token(repos, roster):
     """Two replaced words in a row are one block for difflib: each must still find its own token."""
     c = talk(
         notes="שיחה עם אגם ושקד על התורנות.",
-        mentions=[{"word": "אגם", "means": "trainee:אגם אוחיון"}, {"word": "ושקד", "means": "trainee:שקד ששון"}],
+        mentions=[{"word": "אגם", "means": "trainee:אגם לנדאו"}, {"word": "ושקד", "means": "trainee:שקד ששון"}],
     )
     results = measure(resolve(c, repos.staff, repos.trainees, repos.goals), roster)
-    assert [r.sent_as for r in results] == ["[TRAINEE_2]", "ו[TRAINEE_4]"]
+    assert [r.sent_as for r in results] == ["[TRAINEE_35]", "ו[TRAINEE_4]"]

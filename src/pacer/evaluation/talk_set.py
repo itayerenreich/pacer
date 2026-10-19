@@ -23,8 +23,8 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from pacer.domain import Goal, NoteKind, StaffMember, Trainee
-from pacer.repositories.interfaces import GoalRepo, StaffRepo, TraineeRepo
+from pacer.domain import Goal, GoalStatus, NoteKind, StaffMember, Trainee, TraineeStatus
+from pacer.repositories.interfaces import GoalRepo, GroupRepo, StaffRepo, TraineeRepo
 
 _MEANING = re.compile(r"^(word|trainee:.+|staff:.+)$")
 
@@ -147,17 +147,37 @@ class CaseError(Exception):
     """A case does not fit the academy: a name, a goal or a counselor that is not there."""
 
 
-def resolve(case: TalkCase, staff: StaffRepo, trainees: TraineeRepo, goals: GoalRepo) -> ResolvedTalk:
+OPEN = (GoalStatus.NOT_STARTED, GoalStatus.IN_PROGRESS)  # a talk can move only these
+
+
+def resolve(
+    case: TalkCase, staff: StaffRepo, trainees: TraineeRepo, goals: GoalRepo, groups: GroupRepo | None = None
+) -> ResolvedTalk:
+    """The case's people and goals, found in the academy, and checked to make sense there: an active
+    trainee, their own counselor, open goals. (The first version of the set had a trainee who had left
+    the academy, all her goals dropped: the pipeline rightly refused every proposal, and the scores
+    would have measured the set's mistake.)"""
     problems: list[str] = []
     trainee = next((t for t in trainees.list_all() if t.full_name == case.trainee), None)
     counselor = next((s for s in staff.list_all() if s.full_name == case.counselor), None)
     if trainee is None:
         problems.append(f"no trainee named {case.trainee}")
+    elif trainee.status is not TraineeStatus.ACTIVE:
+        problems.append(f"{case.trainee} is {trainee.status}, not active")
     if counselor is None:
         problems.append(f"no staff member named {case.counselor}")
+    if trainee is not None and counselor is not None and groups is not None:
+        group = groups.get(trainee.group_id) if trainee.group_id is not None else None
+        if group is None or counselor.key not in group.counselor_ids:
+            problems.append(f"{case.counselor} is not a counselor of {case.trainee}'s group")
     their_goals = goals.list_by_trainee(trainee.key) if trainee is not None else []
-    titles = {g.title for g in their_goals}
-    problems += [f"{case.trainee} has no goal '{p.goal}'" for p in case.progress if trainee and p.goal not in titles]
+    by_title = {g.title: g for g in their_goals}
+    for p in case.progress:
+        goal = by_title.get(p.goal)
+        if trainee is not None and goal is None:
+            problems.append(f"{case.trainee} has no goal '{p.goal}'")
+        elif goal is not None and goal.status not in OPEN:
+            problems.append(f"'{p.goal}' is {goal.status}: a talk cannot move it")
     for m in case.mentions:
         kind, _, name = m.means.partition(":")
         people = trainees.list_all() if kind == "trainee" else staff.list_all() if kind == "staff" else []

@@ -33,6 +33,7 @@ from .structured import complete_structured
 
 log = logging.getLogger(__name__)
 
+PROMPT_VERSION = 3  # pinned: a used version is never edited, a change is a new version
 NO_SOURCE = "לא נמצא בספרייה מקור שעונה על השאלה הזו. אפשר לנסח אותה אחרת, או להוסיף לספרייה מקור מתאים."
 
 
@@ -89,6 +90,7 @@ class AskResult:
     issues: list[Issue] = field(default_factory=list)
     prompt_ref: str | None = None  # None when no model was asked
     cost_usd: float | None = 0.0
+    passages: list[str] = field(default_factory=list, repr=False)  # the text of P1, P2... (the evaluation)
 
     @property
     def insufficient(self) -> bool:
@@ -165,6 +167,7 @@ def validate_answer(raw: LibraryAnswer, hits: list[ScoredChunk], question: Anony
         claims=claims,
         citations=citations,
         issues=issues,
+        passages=[hit.chunk.text for hit in hits],
     )
 
 
@@ -186,7 +189,7 @@ class LibraryAnswerer:
         self._embedder = embedder
         self._chunking = chunking
         self._k = k
-        self._prompt = prompt or load_prompt("library_answer", 3)  # pinned
+        self._prompt = prompt or load_prompt("library_answer", PROMPT_VERSION)
 
     def prepare(self, question: str) -> tuple[AnonymizedText, list[ScoredChunk]]:
         """Everything before the model: anonymize the question, and retrieve passages for it.

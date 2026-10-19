@@ -61,6 +61,7 @@ from .structured import complete_structured
 
 log = logging.getLogger(__name__)
 
+PROMPT_VERSION = 2  # pinned: the pipeline and the evaluation use the same one
 _WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
 
@@ -130,12 +131,19 @@ def anonymize_talk(
     held_on: date,
     goals: Sequence[Goal],
     notes: str,
+    *,
+    words_in_notes: Sequence[tuple[int, int]] = (),
 ) -> AnonymizedText:
     """The whole message, anonymized as one text. The talk's trainee and counselor are preferred
-    when a name is ambiguous: in their own talk, it is most likely them."""
+    when a name is ambiguous: in their own talk, it is most likely them.
+    words_in_notes: spans of `notes` a person marked as words, not names (see Anonymizer.anonymize)."""
     about = [roster.find(PersonKind.TRAINEE, trainee.key), roster.find(PersonKind.STAFF, counselor.key)]
+    document = talk_document(trainee, counselor, held_on, goals, notes)
+    start = len(document) - len(notes)  # the notes end the document
     return Anonymizer(roster).anonymize(
-        talk_document(trainee, counselor, held_on, goals, notes), prefer=[p for p in about if p is not None]
+        document,
+        prefer=[p for p in about if p is not None],
+        words=[(start + s, start + e) for s, e in words_in_notes],
     )
 
 
@@ -146,13 +154,17 @@ def prepare_talk_message(
     held_on: date,
     goals: Sequence[Goal],
     notes: str,
+    *,
+    words_in_notes: Sequence[tuple[int, int]] = (),
 ) -> tuple[AnonymizedText, int]:
     """The exact message that goes to the model, and how many sensitive sentences (and goal titles)
     were removed.
-    One function for the pipeline AND the dry run, so the dry run never shows something else."""
+    One function for the pipeline AND the dry run, so the dry run never shows something else.
+    words_in_notes: spans in the notes AFTER sensitive sentences are removed (the evaluation only)."""
     kept, removed = remove_sensitive_sentences(notes)
     removed += sum(1 for goal in goals if is_sensitive(goal.title))
-    return anonymize_talk(roster, trainee, counselor, held_on, goals, kept), removed
+    message = anonymize_talk(roster, trainee, counselor, held_on, goals, kept, words_in_notes=words_in_notes)
+    return message, removed
 
 
 # --- content validation -----------------------------------------------------------------------------
@@ -243,7 +255,7 @@ class TalkPipeline:
     def __init__(self, uow: UnitOfWork, router: Router, *, prompt: Prompt | None = None) -> None:
         self._uow = uow
         self._router = router
-        self._prompt = prompt or load_prompt("talk_summary", 2)
+        self._prompt = prompt or load_prompt("talk_summary", PROMPT_VERSION)
 
     def summarize(self, actor: StaffMember, talk_id: int) -> TalkResult:
         client = self._router.client_for(AITask.SUMMARIZE_TALK)

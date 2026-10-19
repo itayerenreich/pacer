@@ -46,6 +46,8 @@ class AITask(StrEnum):
     SUMMARIZE_TALK = "summarize_talk"  # task 7: personal talk summary + proposed notes
     SYNTHETIC_DATA = "synthetic_data"  # stage 4: invented transcripts and cases for evaluation
     ANSWER_FROM_LIBRARY = "answer_from_library"  # stage 4: a staff question, answered from the library
+    ANSWER_WITHOUT_LIBRARY = "answer_without_library"  # stage 4 evaluation: the same question, no passages
+    JUDGE = "judge"  # stage 4 evaluation: grades an answer or a talk summary against the answer key
 
 
 @dataclass(frozen=True)
@@ -82,6 +84,10 @@ ROUTES: Mapping[AITask, Route] = MappingProxyType(
         AITask.SYNTHETIC_DATA: Route("claude-sonnet", Sensitivity.PUBLIC, max_tokens=8000),
         # The library is not personal, but a question may name a trainee: it is anonymized first.
         AITask.ANSWER_FROM_LIBRARY: Route("claude-haiku", Sensitivity.ANONYMIZED, max_tokens=3000),
+        # The evaluation. The baseline answers like ANSWER_FROM_LIBRARY, with the same model, minus the
+        # passages. The judge is a stronger model than the one it grades (decision 2026-10-19).
+        AITask.ANSWER_WITHOUT_LIBRARY: Route("claude-haiku", Sensitivity.ANONYMIZED, max_tokens=2000),
+        AITask.JUDGE: Route("claude-sonnet", Sensitivity.ANONYMIZED, max_tokens=3000),
     }
 )
 

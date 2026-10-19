@@ -2,22 +2,44 @@
 
 uv run python -m pacer.evaluation check                               # are the sets valid, and do they fit?
 uv run python -m pacer.evaluation masking --out data/masking-report.md  # anonymization vs the answer key
+uv run python -m pacer.evaluation run --out data/eval-claude-haiku.md     # REAL models: costs about $1
+uv run python -m pacer.evaluation run --model claude-sonnet --only talks --limit 2 --out data/try.md
 
-Both read the academy from the database in .env (the demo academy: python -m pacer.demo), and need
-no model. Library retrieval is measured by: python -m pacer.library compare evals/library-v1.json
+check and masking need no model. run needs ANTHROPIC_API_KEY, and Ollama for the embeddings (bge-m3).
+All read the academy from the database in .env (the demo academy: python -m pacer.demo). run writes the
+report (Markdown) and, next to it, a JSON summary that task 9 compares runs by.
+Library retrieval alone (no answering model): python -m pacer.library compare evals/library-v1.json
 """
 
 import argparse
+import json
+from datetime import UTC, datetime
 from pathlib import Path
 
-from pacer.ai.anonymization import load_roster
+from pacer.ai.anonymization import Anonymizer, load_roster
+from pacer.ai.answer import PROMPT_VERSION as ANSWER_PROMPT_VERSION
+from pacer.ai.answer import LibraryAnswerer
+from pacer.ai.embeddings import DEFAULT_EMBEDDING_MODEL, ollama_embedder
+from pacer.ai.routing import MODELS, AITask
+from pacer.ai.talk_pipeline import PROMPT_VERSION as TALK_PROMPT_VERSION
 from pacer.library.__main__ import as_document
+from pacer.library.chunking import DEFAULT_CHUNKING
 from pacer.library.manifest import load_manifest
 from pacer.logging_config import configure_logging, use_utf8_console
 from pacer.repositories import get_engine, repositories
 
 from .library_set import load_library_set, unknown_sources
 from .masking import MentionResult, Outcome, measure, summary
+from .report import render
+from .run import (
+    LibraryCaseResult,
+    TalkCaseResult,
+    library_summary,
+    router_for,
+    run_library_case,
+    run_talk_case,
+    talk_summary,
+)
 from .talk_set import CaseError, load_talk_set, resolve
 
 LIBRARY_SET = Path("evals/library-v1.json")
@@ -55,7 +77,7 @@ def check() -> str:
     with _uow()() as repos:
         for case in talks.cases:
             try:
-                resolve(case, repos.staff, repos.trainees, repos.goals)
+                resolve(case, repos.staff, repos.trainees, repos.goals, repos.groups)
             except CaseError as error:
                 errors.append(str(error))
     lines += [f"  ✗ {e}" for e in errors] or ["  ✓ every case fits the academy in the database"]
@@ -73,7 +95,7 @@ def masking() -> str:
     with _uow()() as repos:
         roster = load_roster(repos.staff, repos.trainees)
         for case in talks.cases:
-            measured = measure(resolve(case, repos.staff, repos.trainees, repos.goals), roster)
+            measured = measure(resolve(case, repos.staff, repos.trainees, repos.goals, repos.groups), roster)
             results += measured
             details += [f"**{case.id}**: {case.tests}", ""]
             details += [_line(r) for r in measured] + [""]
@@ -92,6 +114,66 @@ def masking() -> str:
     return "\n".join(head + details)
 
 
+def run(model: str, *, only: str | None, limit: int | None, baseline: bool, judge: bool) -> tuple[str, dict]:
+    """Every case against real models. Returns the report and the summary (for the JSON file)."""
+    router = router_for(model)
+    uow = _uow()
+    judge_model = router.route(AITask.JUDGE).model
+    library_results: list[LibraryCaseResult] = []
+    talk_results: list[TalkCaseResult] = []
+    library = load_library_set(LIBRARY_SET)
+    talks = load_talk_set(TALK_SET)
+    with uow() as repos:
+        roster = load_roster(repos.staff, repos.trainees)
+        titles = {s.key: s.title for s in repos.sources.list_all()}
+        resolved = [resolve(c, repos.staff, repos.trainees, repos.goals, repos.groups) for c in talks.cases[:limit]]
+    anonymizer = Anonymizer(roster)
+    if only in (None, "library"):
+        answerer = LibraryAnswerer(uow, router, ollama_embedder(DEFAULT_EMBEDDING_MODEL), DEFAULT_CHUNKING)
+        for case in library.cases[:limit]:
+            print(f"library {case.id} ...", flush=True)
+            library_results.append(
+                run_library_case(case, answerer, router, anonymizer, titles, baseline=baseline, judge=judge)
+            )
+    if only in (None, "talks"):
+        for talk in resolved:
+            for words in (False, True):
+                print(f"talk {talk.case.id} ({'words' if words else 'masked'}) ...", flush=True)
+                talk_results.append(run_talk_case(talk, roster, router, words_stay_words=words, judge=judge))
+    lib = library_summary(library_results) if library_results else None
+    tlk = talk_summary(talk_results) if talk_results else None
+    sets = [library.ref, talks.ref]
+    prompts = [f"library_answer@v{ANSWER_PROMPT_VERSION}", f"talk_summary@v{TALK_PROMPT_VERSION}"]
+    summaries = {
+        "model": model,
+        "judge": judge_model if judge else None,
+        "when": datetime.now(UTC).isoformat(timespec="seconds"),
+        "sets": sets,
+        "prompts": prompts,
+        "retrieval": [DEFAULT_EMBEDDING_MODEL, DEFAULT_CHUNKING],
+        "library": lib,
+        "talks": tlk,
+    }
+    costs = ([f"library ${lib['cost_usd']}"] if lib else []) + [
+        f"talks/{k} ${v['cost_usd']}" for k, v in (tlk or {}).items()
+    ]
+    self_judged = (
+        " (אותו מודל: הוא שופט את עצמו, והציון עלול להיות מוטה כלפי מעלה)" if judge and judge_model == model else ""
+    )
+    meta = [
+        f"מודל עונה: **{model}**. שופט: **{judge_model if judge else 'בלי'}**{self_judged}",
+        f"סטים: {', '.join(sets)}. prompts: {', '.join(prompts)}",
+        f"שליפה: {DEFAULT_EMBEDDING_MODEL} · {DEFAULT_CHUNKING}. עלות: {', '.join(costs)}",
+    ]
+    report = render(
+        f"הערכה: {model}",
+        meta,
+        (library_results, lib) if lib else None,
+        (talk_results, tlk) if tlk else None,
+    )
+    return report, summaries
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="python -m pacer.evaluation", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -100,16 +182,35 @@ def main(argv: list[str] | None = None) -> None:
     commands.add_parser("check")
     masking_parser = commands.add_parser("masking")
     masking_parser.add_argument("--out", type=Path)
+    running = commands.add_parser("run", help="every case against real models (costs money)")
+    running.add_argument("--model", default="claude-haiku", choices=list(MODELS), help="the model that answers")
+    running.add_argument("--only", choices=["library", "talks"])
+    running.add_argument("--limit", type=int, help="only the first N cases of each set (a quick try)")
+    running.add_argument("--no-baseline", action="store_true", help="skip answering without the library")
+    running.add_argument("--no-judge", action="store_true", help="skip the judge (code checks only)")
+    running.add_argument("--out", type=Path, required=True, help="the report; the JSON summary goes next to it")
     args = parser.parse_args(argv)
 
     use_utf8_console()
     configure_logging()
-    report = check() if args.command == "check" else masking()
+    summaries = None
+    if args.command == "check":
+        report = check()
+    elif args.command == "masking":
+        report = masking()
+    else:
+        report, summaries = run(
+            args.model, only=args.only, limit=args.limit, baseline=not args.no_baseline, judge=not args.no_judge
+        )
     print(report)
     if getattr(args, "out", None):
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(as_document(report), encoding="utf-8")
         print(f"\nWritten to {args.out}")
+        if summaries is not None:
+            summary_file = args.out.with_suffix(".json")
+            summary_file.write_text(json.dumps(summaries, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            print(f"Summary in {summary_file}")
 
 
 if __name__ == "__main__":
