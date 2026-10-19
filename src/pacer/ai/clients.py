@@ -48,4 +48,8 @@ def ollama_client(
         timeout_s=600,  # a CPU-only laptop: minutes for a long answer, more on the first call (loading)
         retries=0,  # if Ollama is down, retrying won't help: fail fast with a clear message
         options={"num_ctx": context_tokens},
+        # Ollama constrains the answer to the JSON schema ("format"), so even a small model cannot write
+        # broken JSON. Without it, gemma3:4b broke its JSON on Hebrew abbreviations (רמב"ם: a quote
+        # inside a string). LiteLLM's table does not know this about Ollama, so it is said here.
+        native_schema=True,
     )

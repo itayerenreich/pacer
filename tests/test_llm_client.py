@@ -211,3 +211,11 @@ def test_a_local_model_gets_a_context_window_long_enough_for_our_messages(sent):
     assert sent.requests[-1]["num_ctx"] == 8192 and sent.requests[-1]["timeout"] == 600
     cloud().complete(PROMPT, "שלום")
     assert "num_ctx" not in sent.requests[-1]  # only where it means something
+
+
+def test_a_local_model_gets_the_json_schema_as_a_constraint(sent):
+    """Ollama enforces the schema while the model writes: no broken JSON, even from a 4B model."""
+    client = ollama_client("gemma3:4b")
+    assert client.native_schema
+    client.complete(PROMPT, "שלום", response_schema={"type": "object"})
+    assert sent.requests[-1]["response_format"]["json_schema"]["schema"] == {"type": "object"}

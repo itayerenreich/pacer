@@ -415,3 +415,29 @@ def test_runs_are_compared_side_by_side_and_a_self_judged_one_is_flagged(tmp_pat
     assert "| שיחות: מטרות בטווח | 100% | 100% |" in table and "שופט את עצמו" not in table
     flagged = compare_runs([run_file("claude-sonnet", 0.9), run_file("x", 0.9, sets=("library@v2",))])
     assert "שופט את עצמו" in flagged and "לא הוגנת" in flagged
+
+
+def test_ctrl_c_stops_the_run_and_still_reports_what_was_done(repos, models, monkeypatch, tmp_path):
+    import pacer.evaluation.__main__ as cli
+
+    add(repos, TITLE, [("עשרים וחמשה תינוקות למלמד אחד", [1.0, 0.0])])
+    monkeypatch.setattr(cli, "_uow", lambda: FakeUnitOfWork(repos))
+    monkeypatch.setattr(cli, "router_for", lambda model: router_for(model, models=models))
+    monkeypatch.setattr(cli, "ollama_embedder", lambda name: VectorEmbedder([1.0, 0.0]))
+    monkeypatch.setattr(cli, "DEFAULT_CHUNKING", CHUNKING)
+    real = cli.run_library_case
+    calls = []
+
+    def stop_on_the_second(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 2:
+            raise KeyboardInterrupt
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(cli, "run_library_case", stop_on_the_second)
+    out = tmp_path / "eval.md"
+    cli.main(["run", "--limit", "3", "--out", str(out)])
+
+    summary = json.loads(out.with_suffix(".json").read_text(encoding="utf-8"))
+    assert summary["interrupted"] and summary["library"]["cases"] == 1 and summary["talks"] is None
+    assert "נעצרה באמצע" in out.read_text(encoding="utf-8")

@@ -141,24 +141,29 @@ def run(model: str, *, only: str | None, limit: int | None, baseline: bool, judg
         titles = {s.key: s.title for s in repos.sources.list_all()}
         resolved = [resolve(c, repos.staff, repos.trainees, repos.goals, repos.groups) for c in talks.cases[:limit]]
     anonymizer = Anonymizer(roster)
-    if only in (None, "library"):
-        answerer = LibraryAnswerer(uow, router, ollama_embedder(DEFAULT_EMBEDDING_MODEL), DEFAULT_CHUNKING)
-        for case in library.cases[:limit]:
-            print(f"library {case.id} ...", flush=True)
-            try:
-                library_results.append(
-                    run_library_case(case, answerer, router, anonymizer, titles, baseline=baseline, judge=judge)
-                )
-            except (LLMError, StructuredOutputError) as error:
-                failed.append(_failure(case.id, error))
-    if only in (None, "talks"):
-        for talk in resolved:
-            for words in (False, True):
-                print(f"talk {talk.case.id} ({'words' if words else 'masked'}) ...", flush=True)
+    interrupted = False
+    try:  # Ctrl+C stops the run, and what was done so far is still reported
+        if only in (None, "library"):
+            answerer = LibraryAnswerer(uow, router, ollama_embedder(DEFAULT_EMBEDDING_MODEL), DEFAULT_CHUNKING)
+            for case in library.cases[:limit]:
+                print(f"library {case.id} ...", flush=True)
                 try:
-                    talk_results.append(run_talk_case(talk, roster, router, words_stay_words=words, judge=judge))
+                    library_results.append(
+                        run_library_case(case, answerer, router, anonymizer, titles, baseline=baseline, judge=judge)
+                    )
                 except (LLMError, StructuredOutputError) as error:
-                    failed.append(_failure(f"{talk.case.id} ({'words' if words else 'masked'})", error))
+                    failed.append(_failure(case.id, error))
+        if only in (None, "talks"):
+            for talk in resolved:
+                for words in (False, True):
+                    print(f"talk {talk.case.id} ({'words' if words else 'masked'}) ...", flush=True)
+                    try:
+                        talk_results.append(run_talk_case(talk, roster, router, words_stay_words=words, judge=judge))
+                    except (LLMError, StructuredOutputError) as error:
+                        failed.append(_failure(f"{talk.case.id} ({'words' if words else 'masked'})", error))
+    except KeyboardInterrupt:
+        interrupted = True
+        print("\nStopped (Ctrl+C): reporting what was done so far.", flush=True)
     lib = library_summary(library_results) if library_results else None
     tlk = talk_summary(talk_results) if talk_results else None
     sets = [library.ref, talks.ref]
@@ -173,6 +178,7 @@ def run(model: str, *, only: str | None, limit: int | None, baseline: bool, judg
         "library": lib,
         "talks": tlk,
         "failed": failed,
+        "interrupted": interrupted,
     }
     costs = ([f"library ${lib['cost_usd']}"] if lib else []) + [
         f"talks/{k} ${v['cost_usd']}" for k, v in (tlk or {}).items()
@@ -185,6 +191,8 @@ def run(model: str, *, only: str | None, limit: int | None, baseline: bool, judg
         f"סטים: {', '.join(sets)}. prompts: {', '.join(prompts)}",
         f"שליפה: {DEFAULT_EMBEDDING_MODEL} · {DEFAULT_CHUNKING}. עלות: {', '.join(costs)}",
     ]
+    if interrupted:
+        meta.append("**ההרצה נעצרה באמצע (Ctrl+C):** הציונים הם רק על המקרים שהספיקו לרוץ.")
     if failed:
         meta.append(f"**נכשלו ({len(failed)}), ולא נכללים בציונים:** " + "; ".join(failed))
     report = render(
