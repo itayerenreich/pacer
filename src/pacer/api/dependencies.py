@@ -21,7 +21,6 @@ Even the actor is read in its own short transaction (DetachedActor), closed befo
 """
 
 from collections.abc import Iterator
-from functools import cache
 from typing import Annotated
 
 from fastapi import Depends, Header
@@ -33,8 +32,6 @@ from pacer.ai.embeddings import DEFAULT_EMBEDDING_MODEL, Embedder, ollama_embedd
 from pacer.ai.meeting_pipeline import MeetingPipeline
 from pacer.ai.routing import Router, get_router
 from pacer.ai.talk_pipeline import TalkPipeline
-from pacer.ai.transcription import RecordingStore, Transcriber, WhisperTranscriber
-from pacer.config import get_ai_settings
 from pacer.domain import StaffMember
 from pacer.library.chunking import DEFAULT_CHUNKING
 from pacer.repositories import (
@@ -273,29 +270,11 @@ def get_ai_router() -> Router:
     return get_router()
 
 
-@cache
-def _whisper() -> Transcriber | None:
-    """One transcriber per process: it holds the loaded model. None when faster-whisper is not installed."""
-    if not WhisperTranscriber.available():
-        return None
-    return WhisperTranscriber(get_ai_settings().whisper_model)
-
-
-def get_transcriber() -> Transcriber | None:
-    return _whisper()
-
-
-def get_recordings() -> RecordingStore:
-    return RecordingStore(get_ai_settings().recordings_dir)
-
-
 def get_meeting_pipeline(
     uow: UnitOfWorkDep,
     router: Annotated[Router, Depends(get_ai_router)],
-    transcriber: Annotated[Transcriber | None, Depends(get_transcriber)],
-    recordings: Annotated[RecordingStore, Depends(get_recordings)],
 ) -> MeetingPipeline:
-    return MeetingPipeline(uow, router, transcriber=transcriber, recordings=recordings)
+    return MeetingPipeline(uow, router)
 
 
 MeetingPipelineDep = Annotated[MeetingPipeline, Depends(get_meeting_pipeline)]

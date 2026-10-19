@@ -2,7 +2,7 @@
 
 Three state machines, one idea: the AI proposes, a person decides.
 
-    StaffMeeting:   uploaded -> transcribed -> anonymized -> extracted -> pending_approval -> approved
+    StaffMeeting:   transcribed -> anonymized -> extracted -> pending_approval -> approved
     ProposedTask:   proposed -> approved | rejected          (a manager decides; may edit first)
     Task:           open -> done
 
@@ -23,7 +23,6 @@ from .state import require_transition
 M, P, T = MeetingStatus, ProposalStatus, TaskStatus
 
 MEETING_TRANSITIONS: dict[MeetingStatus, frozenset[MeetingStatus]] = {
-    M.UPLOADED: frozenset({M.TRANSCRIBED}),
     M.TRANSCRIBED: frozenset({M.ANONYMIZED}),
     M.ANONYMIZED: frozenset({M.EXTRACTED}),
     M.EXTRACTED: frozenset({M.PENDING_APPROVAL}),
@@ -56,9 +55,9 @@ class StaffMeeting(Entity):
     held_on: date
     created_by_id: int
     participant_ids: list[int] = Field(min_length=1)
-    status: MeetingStatus = MeetingStatus.UPLOADED
+    status: MeetingStatus = MeetingStatus.TRANSCRIBED
     # Raw text: PERSONAL data. Stays in the local database; never sent to a cloud model.
-    transcript: str | None = Field(default=None, min_length=TRANSCRIPT_MIN_LENGTH, repr=False)
+    transcript: str = Field(min_length=TRANSCRIPT_MIN_LENGTH, repr=False)
     # Names replaced by tokens: the only form a cloud model may see.
     anonymized_transcript: str | None = Field(default=None, repr=False)
     summary: str | None = Field(default=None, repr=False)
@@ -70,7 +69,6 @@ class StaffMeeting(Entity):
             raise ValueError("A participant appears more than once")
         reached = _ORDER.index(self.status)
         for needed, field_name in [
-            (M.TRANSCRIBED, "transcript"),
             (M.ANONYMIZED, "anonymized_transcript"),
             (M.EXTRACTED, "summary"),
         ]:

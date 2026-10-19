@@ -74,24 +74,22 @@ class MeetingService:
         title: str,
         held_on: date,
         participant_ids: list[int],
-        transcript: str | None = None,
+        transcript: str,
     ) -> StaffMeeting:
-        """A meeting from a text transcript starts TRANSCRIBED; one waiting for audio, UPLOADED."""
+        """A meeting starts TRANSCRIBED: its text is all the pipeline needs."""
         require(is_manager(actor), "create staff meetings")
         for staff_id in participant_ids:
             found(self._staff.get(staff_id), "Staff member", staff_id)
-        status = MeetingStatus.TRANSCRIBED if transcript is not None else MeetingStatus.UPLOADED
         meeting = self._meetings.add(
             StaffMeeting(
                 title=title,
                 held_on=held_on,
                 created_by_id=actor.id,
                 participant_ids=participant_ids,
-                status=status,
                 transcript=transcript,
             )
         )
-        log.info("Meeting %s created by staff %s (%s)", meeting.id, actor.id, status)
+        log.info("Meeting %s created by staff %s", meeting.id, actor.id)
         return meeting
 
     def get_meeting(self, actor: StaffMember, meeting_id: int) -> StaffMeeting:

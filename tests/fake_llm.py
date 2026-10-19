@@ -7,7 +7,6 @@ and that no personal data reached a model that is not local.
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 from pacer.ai import LLMResponse, Prompt
@@ -76,23 +75,6 @@ def fake_router(cloud: FakeLLMClient, local: FakeLLMClient | None = None) -> Rou
             "local-small": ModelSpec(runs_locally=True, make_client=lambda: local),
         }
     )
-
-
-@dataclass
-class FakeTranscriber:
-    """Speech to text without a model: returns `text`, or raises `error`. Records each file it got."""
-
-    text: str = ""
-    error: Exception | None = None
-    runs_locally: bool = True
-    calls: list[Path] = field(default_factory=list)
-
-    def transcribe(self, audio: Path) -> str:
-        assert audio.exists(), "the recording must exist while it is transcribed"
-        self.calls.append(audio)
-        if self.error is not None:
-            raise self.error
-        return self.text
 
 
 class FakeEmbedder:

@@ -25,11 +25,6 @@ dependencies = [
 [project.scripts]
 pacer = "pacer:main"
 
-[project.optional-dependencies]
-audio = [
-    "faster-whisper==1.2.1",
-]
-
 [build-system]
 requires = ["uv_build>=0.12.12,<0.13.0"]
 build-backend = "uv_build"
@@ -51,11 +46,6 @@ filterwarnings = [
     # litellm's own type definitions trigger this pydantic notice; it is not about our code
     "ignore:Item .* is using the `ReadOnly` qualifier:UserWarning",
 ]
-
-[tool.uv]
-# Supply-chain cooldown for the optional audio stack: never resolve a release younger than about
-# two weeks (a compromised release is usually caught and pulled within days; see the LiteLLM pin).
-exclude-newer-package = { ctranslate2 = "2026-09-30T00:00:00Z", onnxruntime = "2026-09-30T00:00:00Z", numpy = "2026-09-30T00:00:00Z", av = "2026-09-30T00:00:00Z", faster-whisper = "2026-09-30T00:00:00Z" }
 
 [tool.ruff]
 line-length = 120
@@ -80,5 +70,5 @@ warn_redundant_casts = true
 check_untyped_defs = true
 
 [[tool.mypy.overrides]]
-module = ["litellm.*", "faster_whisper.*", "testcontainers.*"]
+module = ["litellm.*", "testcontainers.*"]
 ignore_missing_imports = true

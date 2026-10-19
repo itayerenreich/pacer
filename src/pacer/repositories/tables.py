@@ -149,7 +149,7 @@ class StaffMeetingRow(Base):
     held_on: Mapped[date]
     created_by_id: Mapped[int] = mapped_column(ForeignKey("staff_members.id"))
     status: Mapped[str] = mapped_column(String(30), index=True)
-    transcript: Mapped[str | None] = mapped_column(Text)
+    transcript: Mapped[str] = mapped_column(Text)
     anonymized_transcript: Mapped[str | None] = mapped_column(Text)
     summary: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

@@ -11,7 +11,7 @@ import json
 from datetime import date
 
 import pytest
-from fake_llm import FakeLLMClient, FakeTranscriber, fake_router
+from fake_llm import FakeLLMClient, fake_router
 from fakes import FakeUnitOfWork, empty_repos
 
 from pacer.ai import LLMUnavailableError
@@ -21,9 +21,8 @@ from pacer.ai.meeting_pipeline import (
     MeetingPipeline,
     extraction_message,
 )
-from pacer.ai.routing import PrivacyViolation, RoutingError
+from pacer.ai.routing import RoutingError
 from pacer.ai.structured import StructuredOutputError
-from pacer.ai.transcription import RecordingStore, TranscriptionError
 from pacer.demo import build_academy
 from pacer.demo.meetings import SHORT, WEEKLY, SampleMeeting
 from pacer.domain import MeetingStatus, StaffMember, StaffRole
@@ -69,16 +68,11 @@ def cloud() -> FakeLLMClient:
     return FakeLLMClient(answers=[json.dumps(WEEKLY_ANSWER, ensure_ascii=False)], model="fake/cloud", runs_locally=False)
 
 
-@pytest.fixture
-def recordings(tmp_path) -> RecordingStore:
-    return RecordingStore(tmp_path / "recordings")
+def make_pipeline(uow, cloud) -> MeetingPipeline:
+    return MeetingPipeline(uow, fake_router(cloud))
 
 
-def make_pipeline(uow, cloud, *, transcriber=None, recordings=None) -> MeetingPipeline:
-    return MeetingPipeline(uow, fake_router(cloud), transcriber=transcriber, recordings=recordings)
-
-
-def record(uow, manager, sample: SampleMeeting = WEEKLY, *, with_transcript: bool = True) -> int:
+def record(uow, manager, sample: SampleMeeting = WEEKLY) -> int:
     with uow() as repos:
         service = MeetingService(repos.meetings, repos.proposals, repos.tasks, repos.staff)
         meeting = service.create_meeting(
@@ -86,7 +80,7 @@ def record(uow, manager, sample: SampleMeeting = WEEKLY, *, with_transcript: boo
             title=sample.title,
             held_on=sample.held_on,
             participant_ids=sample.participant_ids,
-            transcript=sample.transcript if with_transcript else None,
+            transcript=sample.transcript,
         )
     return meeting.id
 
@@ -292,157 +286,6 @@ def test_only_the_manager_runs_the_pipeline(uow, repos, manager, cloud):
     with pytest.raises(PermissionDeniedError):
         make_pipeline(uow, cloud).anonymize(counselor, meeting_id)
     assert cloud.calls == []
-
-
-# --- audio: transcription on this computer, then the recording is deleted ---------------------------
-
-
-TRANSCRIBED = "רונית: נתחיל. איתי, תתאם בבקשה את ההסעה לטיול עד יום חמישי."
-
-
-def upload(pipeline, manager, meeting_id, data: bytes = b"fake-audio", suffix: str = ".m4a") -> int:
-    return pipeline.attach_recording(manager, meeting_id, iter([data]), suffix)
-
-
-def test_a_recording_is_transcribed_locally_then_deleted(uow, repos, manager, cloud, recordings):
-    transcriber = FakeTranscriber(text=TRANSCRIBED)
-    pipeline = make_pipeline(uow, cloud, transcriber=transcriber, recordings=recordings)
-    meeting_id = record(uow, manager, with_transcript=False)
-
-    assert upload(pipeline, manager, meeting_id) == len(b"fake-audio")
-    result = pipeline.process(manager, meeting_id)
-
-    assert transcriber.calls == [recordings.directory / f"meeting-{meeting_id}.m4a"]
-    assert recordings.find(meeting_id) is None  # deleted after the transcript was saved
-    assert repos.meetings.get(meeting_id).transcript == TRANSCRIBED
-    assert result.meeting.status is MeetingStatus.PENDING_APPROVAL
-
-
-def test_a_failed_transcription_keeps_the_recording_and_the_status(uow, repos, manager, cloud, recordings):
-    transcriber = FakeTranscriber(error=TranscriptionError("corrupt file"))
-    pipeline = make_pipeline(uow, cloud, transcriber=transcriber, recordings=recordings)
-    meeting_id = record(uow, manager, with_transcript=False)
-    upload(pipeline, manager, meeting_id)
-
-    with pytest.raises(TranscriptionError):
-        pipeline.process(manager, meeting_id)
-    assert recordings.find(meeting_id) is not None  # kept, so it can be tried again
-    assert repos.meetings.get(meeting_id).status is MeetingStatus.UPLOADED
-    assert cloud.calls == []
-
-
-def test_a_silent_recording_is_not_saved_as_a_transcript(uow, repos, manager, cloud, recordings):
-    pipeline = make_pipeline(uow, cloud, transcriber=FakeTranscriber(text="  אה  "), recordings=recordings)
-    meeting_id = record(uow, manager, with_transcript=False)
-    upload(pipeline, manager, meeting_id)
-
-    with pytest.raises(RuleViolationError, match="almost no text"):
-        pipeline.process(manager, meeting_id)
-    assert recordings.find(meeting_id) is not None
-    assert repos.meetings.get(meeting_id).status is MeetingStatus.UPLOADED
-
-
-def test_a_transcriber_that_is_not_local_is_refused(uow, manager, cloud, recordings):
-    remote = FakeTranscriber(text=TRANSCRIBED, runs_locally=False)
-    pipeline = make_pipeline(uow, cloud, transcriber=remote, recordings=recordings)
-    meeting_id = record(uow, manager, with_transcript=False)
-    with pytest.raises(PrivacyViolation):
-        upload(pipeline, manager, meeting_id)
-    assert remote.calls == []
-
-
-def test_without_a_transcriber_recordings_are_refused_up_front(uow, manager, cloud, recordings):
-    pipeline = make_pipeline(uow, cloud, recordings=recordings)
-    meeting_id = record(uow, manager, with_transcript=False)
-    with pytest.raises(RuleViolationError, match="not set up"):
-        upload(pipeline, manager, meeting_id)
-    assert recordings.find(meeting_id) is None
-
-
-def test_a_meeting_that_has_a_transcript_takes_no_recording(uow, manager, cloud, recordings):
-    pipeline = make_pipeline(uow, cloud, transcriber=FakeTranscriber(text=TRANSCRIBED), recordings=recordings)
-    meeting_id = record(uow, manager)  # transcribed already
-    with pytest.raises(RuleViolationError, match="needs uploaded"):
-        upload(pipeline, manager, meeting_id)
-
-
-def test_a_counselor_cannot_upload_a_recording(uow, repos, manager, cloud, recordings):
-    pipeline = make_pipeline(uow, cloud, transcriber=FakeTranscriber(text=TRANSCRIBED), recordings=recordings)
-    meeting_id = record(uow, manager, with_transcript=False)
-    with pytest.raises(PermissionDeniedError):
-        upload(pipeline, repos.staff.get(3), meeting_id)
-    assert recordings.find(meeting_id) is None
-
-
-def test_a_leftover_recording_is_deleted_by_the_next_stage(uow, manager, cloud, recordings):
-    """If deleting failed after transcription (a crash), anonymizing removes it."""
-    pipeline = make_pipeline(uow, cloud, transcriber=FakeTranscriber(text=TRANSCRIBED), recordings=recordings)
-    meeting_id = record(uow, manager)
-    recordings.save(meeting_id, iter([b"audio"]), ".wav")  # as if left behind
-    pipeline.anonymize(manager, meeting_id)
-    assert recordings.find(meeting_id) is None
-
-
-def test_if_saving_the_transcript_fails_the_recording_is_kept(uow, repos, manager, cloud, recordings, monkeypatch):
-    pipeline = make_pipeline(uow, cloud, transcriber=FakeTranscriber(text=TRANSCRIBED), recordings=recordings)
-    meeting_id = record(uow, manager, with_transcript=False)
-    upload(pipeline, manager, meeting_id)
-
-    def broken(meeting):
-        raise RuntimeError("the database went away")
-
-    monkeypatch.setattr(repos.meetings, "update", broken)
-    with pytest.raises(RuntimeError):
-        pipeline.transcribe(manager, meeting_id)
-    assert recordings.find(meeting_id) is not None  # deleted only after the transcript is safe
-
-
-def test_the_transcribe_stage_itself_deletes_the_recording(uow, manager, cloud, recordings):
-    """Not only the sweep in the next stage: transcription deletes what it transcribed."""
-    pipeline = make_pipeline(uow, cloud, transcriber=FakeTranscriber(text=TRANSCRIBED), recordings=recordings)
-    meeting_id = record(uow, manager, with_transcript=False)
-    upload(pipeline, manager, meeting_id)
-    pipeline.transcribe(manager, meeting_id)
-    assert recordings.find(meeting_id) is None
-
-
-def test_a_participant_who_never_spoke_can_be_named_by_token(uow, manager):
-    """נועה (2) attended but is never named in the text. The model may still give her a task by her
-    participant token, and both the task and the summary get her name back."""
-    silent = SampleMeeting(
-        title="ישיבה",
-        held_on=date(2026, 10, 12),
-        participant_ids=[1, 2],
-        transcript="רונית: מי שאחראית על ההתנדבות תקבע את השעות עם בית האבות עד חמישי.",
-    )
-    reply = answer(
-        summary="[STAFF_1] ביקשה מ[STAFF_2] לקבוע את שעות ההתנדבות.",
-        tasks=[{"description": "לקבוע את שעות ההתנדבות", "owner": "[STAFF_2]", "due_date": "2026-10-15"}],
-    )
-    result = make_pipeline(uow, FakeLLMClient(answers=[reply], runs_locally=False)).process(
-        manager, record(uow, manager, silent)
-    )
-    assert result.meeting.summary == "רונית שמעוני ביקשה מנועה לוי לקבוע את שעות ההתנדבות."
-    assert result.proposals[0].owner_id == 2
-    assert result.issues == []  # her token was in the message, so it is not "invented"
-
-
-def test_a_recording_that_arrives_after_the_meeting_moved_on_is_deleted(uow, repos, manager, cloud, recordings, monkeypatch):
-    """The upload took a while; meanwhile someone gave the meeting a transcript some other way."""
-    pipeline = make_pipeline(uow, cloud, transcriber=FakeTranscriber(text=TRANSCRIBED), recordings=recordings)
-    meeting_id = record(uow, manager, with_transcript=False)
-    real_save = recordings.save
-
-    def save_while_meeting_moves_on(*args, **kwargs):
-        path = real_save(*args, **kwargs)
-        meeting = repos.meetings.get(meeting_id)
-        repos.meetings.update(meeting.advance(MeetingStatus.TRANSCRIBED, transcript=TRANSCRIBED))
-        return path
-
-    monkeypatch.setattr(recordings, "save", save_while_meeting_moves_on)
-    with pytest.raises(RuleViolationError, match="during the upload"):
-        upload(pipeline, manager, meeting_id)
-    assert recordings.find(meeting_id) is None
 
 
 # --- names that are common words (finding 1, 2026-10-15) ---------------------------------------

@@ -9,12 +9,10 @@ errors, and this module decides how each one looks to an HTTP client:
     RuleViolationError         409  conflicts with the current state of other objects
     DomainRuleError            409  not allowed in the object's current state
     pydantic.ValidationError   422  invalid values (same code FastAPI uses for bad input)
-    RecordingError             422  an audio file of the wrong type, empty, or too large
 
 AI steps (stage 3):
     StructuredOutputError      502  the model answered, but not validly, twice. Its answer was not saved
     LLMError (and subclasses)  503  the model could not be used: no key, down, rate-limited
-    TranscriptionError         503  local transcription failed or is not installed
     PrivacyViolation,          500  a safety check stopped the request. A bug, never "normal":
     AnonymizationError,             logged as an ERROR
     RoutingError
@@ -33,7 +31,6 @@ from pacer.ai import LLMError
 from pacer.ai.anonymization import AnonymizationError
 from pacer.ai.routing import PrivacyViolation, RoutingError
 from pacer.ai.structured import StructuredOutputError
-from pacer.ai.transcription import RecordingError, TranscriptionError
 from pacer.domain import DomainRuleError
 from pacer.services import NotFoundError, PermissionDeniedError, RuleViolationError
 
@@ -50,10 +47,8 @@ STATUS_BY_ERROR: dict[type[Exception], int] = {
     NotFoundError: status.HTTP_404_NOT_FOUND,
     RuleViolationError: status.HTTP_409_CONFLICT,
     DomainRuleError: status.HTTP_409_CONFLICT,
-    RecordingError: status.HTTP_422_UNPROCESSABLE_CONTENT,
     StructuredOutputError: status.HTTP_502_BAD_GATEWAY,
     LLMError: status.HTTP_503_SERVICE_UNAVAILABLE,
-    TranscriptionError: status.HTTP_503_SERVICE_UNAVAILABLE,
     PrivacyViolation: status.HTTP_500_INTERNAL_SERVER_ERROR,
     AnonymizationError: status.HTTP_500_INTERNAL_SERVER_ERROR,
     RoutingError: status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -62,7 +57,6 @@ STATUS_BY_ERROR: dict[type[Exception], int] = {
 _FIXED_DETAIL: dict[type[Exception], str] = {
     StructuredOutputError: "The model's answer was invalid twice and was not saved. Run it again.",
     LLMError: "The language model could not be used right now. Stages already done are kept; try again later.",
-    TranscriptionError: "The recording could not be transcribed. It was kept; try again later.",
     PrivacyViolation: "A privacy check stopped this request. Nothing was sent or saved.",
     AnonymizationError: "A privacy check stopped this request. Nothing was sent or saved.",
     RoutingError: "The AI configuration is invalid. Nothing was sent or saved.",

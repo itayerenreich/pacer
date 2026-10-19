@@ -1,8 +1,12 @@
-"""The staff meeting pipeline: from a recording or a transcript to proposals the manager reviews.
+"""The staff meeting pipeline: from the text of a meeting to proposals the manager reviews.
 
-    UPLOADED ──transcribe──> TRANSCRIBED ──anonymize──> ANONYMIZED ──extract──> PENDING_APPROVAL
-    (audio)    local Whisper  (raw text)    code, local  (tokens)    Claude +    (proposals)
-                                                                     validation
+    TRANSCRIBED ──anonymize──> ANONYMIZED ──extract──> PENDING_APPROVAL
+    (raw text)    code, local  (tokens)    Claude +    (proposals)
+                                           validation
+
+The text is typed or pasted by the manager. Audio recordings were dropped on 2026-10-19: speech-to-text
+in Hebrew, on a CPU, with several speakers, was not reliable enough to build on, and a recording of
+staff talking about trainees is the most sensitive data the system would ever hold.
 
 Every stage reads its input from the database and saves its output there, and moves the meeting
 one status forward. So the status always says what has been done, and when a stage fails (the
@@ -11,7 +15,7 @@ again continues from that stage, without redoing (or paying for) the stages befo
 
 Three rules shape this module:
 
-1. No model call inside a database transaction. A model takes seconds (Whisper, minutes). A
+1. No model call inside a database transaction. A model takes seconds. A
    transaction held open that long would keep a connection and locks busy for everyone else.
    So a stage that calls a model does: short transaction (read) -> model -> short transaction
    (write). The write locks the meeting row and checks the status again: if another request
@@ -35,7 +39,7 @@ from datetime import date, timedelta
 from pydantic import BaseModel, ConfigDict, Field
 
 from pacer.domain import MeetingStatus, ProposedTask, StaffMeeting, StaffMember, StaffRole, present
-from pacer.domain.meeting import DESCRIPTION_MAX_LENGTH, TRANSCRIPT_MIN_LENGTH
+from pacer.domain.meeting import DESCRIPTION_MAX_LENGTH
 from pacer.repositories import Repos, UnitOfWork
 from pacer.services import MeetingService, RuleViolationError, TaskDraft
 from pacer.services.errors import found
@@ -52,10 +56,9 @@ from .anonymization import (
 )
 from .issues import Issue, IssueCode
 from .prompts import Prompt, load_prompt
-from .routing import AITask, PrivacyViolation, Router
+from .routing import AITask, Router
 from .sensitive import remove_sensitive_sentences
 from .structured import complete_structured
-from .transcription import RecordingStore, Transcriber
 
 log = logging.getLogger(__name__)
 
@@ -227,8 +230,6 @@ class MeetingPipeline:
 
     uow:          a factory of short transactions (repositories(engine) in production, fakes in tests)
     router:       hands out the model for AITask.EXTRACT_MEETING, and enforces the privacy rule
-    transcriber:  local speech-to-text, needed only for meetings uploaded as audio
-    recordings:   where uploaded audio waits for transcription
     """
 
     def __init__(
@@ -236,14 +237,10 @@ class MeetingPipeline:
         uow: UnitOfWork,
         router: Router,
         *,
-        transcriber: Transcriber | None = None,
-        recordings: RecordingStore | None = None,
         prompt: Prompt | None = None,
     ) -> None:
         self._uow = uow
         self._router = router
-        self._transcriber = transcriber
-        self._recordings = recordings
         self._prompt = prompt or load_prompt("meeting_extract", 3)  # a pinned version, not "latest"
 
     def process(self, actor: StaffMember, meeting_id: int) -> ExtractionResult:
@@ -251,55 +248,11 @@ class MeetingPipeline:
         status = self._read(actor, meeting_id).status
         if _STAGES.index(status) >= _STAGES.index(M.EXTRACTED):
             raise RuleViolationError(f"Meeting {meeting_id} is {status}: there is nothing left to process")
-        if status is M.UPLOADED:
-            self.transcribe(actor, meeting_id)
-        if status in (M.UPLOADED, M.TRANSCRIBED):
+        if status is M.TRANSCRIBED:
             self.anonymize(actor, meeting_id)
         return self.extract(actor, meeting_id)
 
-    # --- recordings --------------------------------------------------------------------------
-
-    def attach_recording(
-        self, actor: StaffMember, meeting_id: int, chunks: Iterable[bytes], suffix: str
-    ) -> int:
-        """Store the audio of a meeting that is waiting for it (created without a transcript).
-        Returns its size in bytes. Refused up front when this server cannot transcribe."""
-        self._require_local_transcriber()
-        recordings = self._require_recordings()
-        _require_status(self._read(actor, meeting_id), M.UPLOADED)
-        size = recordings.save(meeting_id, chunks, suffix).stat().st_size
-        # The upload took time. If the meeting moved on meanwhile, nothing would ever transcribe
-        # or delete this file: remove it now rather than keep a recording no one will use.
-        if self._read(actor, meeting_id).status is not M.UPLOADED:
-            recordings.delete(meeting_id)
-            raise RuleViolationError(f"Meeting {meeting_id} was processed during the upload; the recording was deleted")
-        return size
-
-    # --- stage 1: transcribe (local) ---------------------------------------------------------
-
-    def transcribe(self, actor: StaffMember, meeting_id: int) -> StaffMeeting:
-        transcriber = self._require_local_transcriber()
-        recordings = self._require_recordings()
-        _require_status(self._read(actor, meeting_id), M.UPLOADED)
-        recording = recordings.find(meeting_id)
-        if recording is None:
-            raise RuleViolationError(f"Meeting {meeting_id} has no recording yet: upload one first")
-
-        text = transcriber.transcribe(recording).strip()  # no transaction open: this takes minutes
-        if len(text) < TRANSCRIPT_MIN_LENGTH:
-            raise RuleViolationError(
-                f"The recording of meeting {meeting_id} gave almost no text (silence?). It was kept; "
-                "check it and upload it again"
-            )
-        with self._uow() as repos:
-            meeting = _require_status(repos.meetings.lock(meeting_id), M.UPLOADED)
-            transcribed = repos.meetings.update(meeting.advance(M.TRANSCRIBED, transcript=text))
-        # Only after the transcript is committed: if saving had failed, the recording is still here.
-        recordings.delete(meeting_id)
-        log.info("Meeting %s transcribed: %s characters", meeting_id, len(text))
-        return transcribed
-
-    # --- stage 2: anonymize (local, code only) -------------------------------------------------
+    # --- stage 1: anonymize (local, code only) -------------------------------------------------
 
     def anonymize(self, actor: StaffMember, meeting_id: int) -> StaffMeeting:
         with self._uow() as repos:
@@ -310,8 +263,6 @@ class MeetingPipeline:
             transcript = present(meeting.transcript, "the transcript of a transcribed meeting")
             safe, _ = anonymize_meeting(load_roster(repos.staff, repos.trainees), transcript, participants)
             anonymized = repos.meetings.update(meeting.advance(M.ANONYMIZED, anonymized_transcript=safe.text))
-        if self._recordings is not None:
-            self._recordings.delete(meeting_id)  # a recording never outlives its transcript, even after a crash
         log.info(
             "Meeting %s anonymized: %s people, %s unresolved names",
             meeting_id,
@@ -320,7 +271,7 @@ class MeetingPipeline:
         )
         return anonymized
 
-    # --- stage 3: extract (cloud, anonymized only) and validate ----------------------------------
+    # --- stage 2: extract (cloud, anonymized only) and validate ----------------------------------
 
     def extract(self, actor: StaffMember, meeting_id: int) -> ExtractionResult:
         client = self._router.client_for(AITask.EXTRACT_MEETING)  # fails now if, e.g., there is no key
@@ -389,18 +340,6 @@ class MeetingPipeline:
     @staticmethod
     def _service(repos: Repos) -> MeetingService:
         return MeetingService(repos.meetings, repos.proposals, repos.tasks, repos.staff)
-
-    def _require_local_transcriber(self) -> Transcriber:
-        if self._transcriber is None:
-            raise RuleViolationError("Audio transcription is not set up on this server; upload a transcript")
-        if not self._transcriber.runs_locally:  # the same rule as the router: personal data stays here
-            raise PrivacyViolation("Recordings may only be transcribed by a model on this computer")
-        return self._transcriber
-
-    def _require_recordings(self) -> RecordingStore:
-        if self._recordings is None:
-            raise RuleViolationError("Audio recordings are not set up on this server; upload a transcript")
-        return self._recordings
 
 
 def _require_status(meeting: StaffMeeting | None, status: MeetingStatus) -> StaffMeeting:

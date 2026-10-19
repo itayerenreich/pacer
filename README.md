@@ -7,8 +7,8 @@ manager track trainees, the personal goals they set together, and progress over 
 Sensitive actions, like opening a trainee's personal file or sending a trainee home,
 go through manager approval.
 
-On top of this data layer sit AI features: staff meetings (a recording or a transcript)
-become a summary and proposed tasks, and a counselor's notes from a personal talk become a
+On top of this data layer sit AI features: the text of a staff meeting becomes a
+summary and proposed tasks, and a counselor's notes from a personal talk become a
 summary, goal progress updates and notes worth remembering. The AI sits **above** the data,
 never instead of it: it proposes, and a person approves every item before anything changes.
 
@@ -54,8 +54,8 @@ Some of the decisions behind it:
   `AnonymizedText`, a type that only the anonymizer can create. Hebrew names that are also
   everyday words ("כבר" is כ + בר) become neutral tokens that turn back into the word. A second,
   independent word-by-word check runs before anything is sent. Sentences about health are removed
-  from talk notes and meeting transcripts before anything is sent. Recordings are
-  transcribed by a local Whisper model and deleted once the transcript is saved.
+  from talk notes and meeting transcripts before anything is sent. There are no audio recordings
+  at all: a meeting comes in as text (decision 2026-10-19, after weighing Hebrew speech-to-text).
 - **No model call inside a database transaction.** A pipeline reads in a short transaction,
   calls the model with none open, then writes in a short one that locks the row and re-checks
   its status, so two requests on the same meeting never save twice (tested with real threads
@@ -68,7 +68,7 @@ Some of the decisions behind it:
 ## Stack
 
 Python 3.12 · uv · FastAPI · Pydantic · SQLAlchemy 2 · PostgreSQL 17 · Alembic · Docker ·
-pytest · testcontainers · GitHub Actions · LiteLLM · Claude · Ollama · faster-whisper
+pytest · testcontainers · GitHub Actions · LiteLLM · Claude · Ollama · pgvector
 
 ## Run it
 
@@ -92,7 +92,6 @@ AI features need `ANTHROPIC_API_KEY` in `.env` (never in Git). Try them on sampl
 uv run python -m pacer.demo.meeting weekly          # dry run: prints exactly what would be sent
 uv run python -m pacer.demo.meeting weekly --send   # summary and proposed tasks (about $0.001)
 uv run python -m pacer.demo.talk maya --send        # a personal talk: progress and note proposals
-uv sync --extra audio                               # optional: local Whisper, for recordings
 ```
 
 ## Tests

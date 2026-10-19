@@ -83,10 +83,11 @@ class MeetingCreate(_Body):
     title: Annotated[str, StaffMeeting.model_fields["title"]]
     held_on: date
     participant_ids: list[int] = Field(min_length=1, description="Staff members who took part")
-    transcript: str | None = Field(
-        default=None,
+    transcript: str = Field(
         min_length=20,
-        description="The meeting as text. Leave empty to upload a recording instead (POST /meetings/{id}/audio).",
+        max_length=100_000,
+        description="The meeting as text: typed notes, or a transcript made elsewhere. Stays on this server; "
+        "only an anonymized version reaches the model.",
     )
 
 
@@ -195,11 +196,6 @@ class ProcessResult(BaseModel):
             cost_usd=result.cost_usd,
             removed_sentences=result.removed_sentences,
         )
-
-
-class RecordingReceived(BaseModel):
-    meeting_id: int
-    size_bytes: int
 
 
 class SummarizeResult(BaseModel):
