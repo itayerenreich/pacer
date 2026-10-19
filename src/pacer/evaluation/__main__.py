@@ -16,11 +16,13 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from pacer.ai import LLMError
 from pacer.ai.anonymization import Anonymizer, load_roster
 from pacer.ai.answer import PROMPT_VERSION as ANSWER_PROMPT_VERSION
 from pacer.ai.answer import LibraryAnswerer
 from pacer.ai.embeddings import DEFAULT_EMBEDDING_MODEL, ollama_embedder
 from pacer.ai.routing import MODELS, AITask
+from pacer.ai.structured import StructuredOutputError
 from pacer.ai.talk_pipeline import PROMPT_VERSION as TALK_PROMPT_VERSION
 from pacer.library.__main__ import as_document
 from pacer.library.chunking import DEFAULT_CHUNKING
@@ -114,6 +116,13 @@ def masking() -> str:
     return "\n".join(head + details)
 
 
+def _failure(case_id: str, error: Exception) -> str:
+    """One line for a case that failed. The cause's message too: it says what the provider refused."""
+    cause = f" ({type(error.__cause__).__name__}: {error.__cause__})" if error.__cause__ else ""
+    print(f"  ✗ {case_id} failed: {type(error).__name__}: {error}{cause}", flush=True)
+    return f"{case_id}: {type(error).__name__}: {str(error)[:200]}{cause[:300]}"
+
+
 def run(model: str, *, only: str | None, limit: int | None, baseline: bool, judge: bool) -> tuple[str, dict]:
     """Every case against real models. Returns the report and the summary (for the JSON file)."""
     router = router_for(model)
@@ -121,6 +130,7 @@ def run(model: str, *, only: str | None, limit: int | None, baseline: bool, judg
     judge_model = router.route(AITask.JUDGE).model
     library_results: list[LibraryCaseResult] = []
     talk_results: list[TalkCaseResult] = []
+    failed: list[str] = []  # a case whose model call failed is reported, and the run goes on
     library = load_library_set(LIBRARY_SET)
     talks = load_talk_set(TALK_SET)
     with uow() as repos:
@@ -132,14 +142,20 @@ def run(model: str, *, only: str | None, limit: int | None, baseline: bool, judg
         answerer = LibraryAnswerer(uow, router, ollama_embedder(DEFAULT_EMBEDDING_MODEL), DEFAULT_CHUNKING)
         for case in library.cases[:limit]:
             print(f"library {case.id} ...", flush=True)
-            library_results.append(
-                run_library_case(case, answerer, router, anonymizer, titles, baseline=baseline, judge=judge)
-            )
+            try:
+                library_results.append(
+                    run_library_case(case, answerer, router, anonymizer, titles, baseline=baseline, judge=judge)
+                )
+            except (LLMError, StructuredOutputError) as error:
+                failed.append(_failure(case.id, error))
     if only in (None, "talks"):
         for talk in resolved:
             for words in (False, True):
                 print(f"talk {talk.case.id} ({'words' if words else 'masked'}) ...", flush=True)
-                talk_results.append(run_talk_case(talk, roster, router, words_stay_words=words, judge=judge))
+                try:
+                    talk_results.append(run_talk_case(talk, roster, router, words_stay_words=words, judge=judge))
+                except (LLMError, StructuredOutputError) as error:
+                    failed.append(_failure(f"{talk.case.id} ({'words' if words else 'masked'})", error))
     lib = library_summary(library_results) if library_results else None
     tlk = talk_summary(talk_results) if talk_results else None
     sets = [library.ref, talks.ref]
@@ -153,6 +169,7 @@ def run(model: str, *, only: str | None, limit: int | None, baseline: bool, judg
         "retrieval": [DEFAULT_EMBEDDING_MODEL, DEFAULT_CHUNKING],
         "library": lib,
         "talks": tlk,
+        "failed": failed,
     }
     costs = ([f"library ${lib['cost_usd']}"] if lib else []) + [
         f"talks/{k} ${v['cost_usd']}" for k, v in (tlk or {}).items()
@@ -165,6 +182,8 @@ def run(model: str, *, only: str | None, limit: int | None, baseline: bool, judg
         f"סטים: {', '.join(sets)}. prompts: {', '.join(prompts)}",
         f"שליפה: {DEFAULT_EMBEDDING_MODEL} · {DEFAULT_CHUNKING}. עלות: {', '.join(costs)}",
     ]
+    if failed:
+        meta.append(f"**נכשלו ({len(failed)}), ולא נכללים בציונים:** " + "; ".join(failed))
     report = render(
         f"הערכה: {model}",
         meta,

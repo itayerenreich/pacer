@@ -342,3 +342,38 @@ def test_an_unknown_cost_makes_the_total_unknown():
 
     assert _total(0.1, 0.2) == pytest.approx(0.3)
     assert _total(0.1, None) is None
+
+
+def test_a_failed_case_is_reported_and_the_run_goes_on(repos, models, monkeypatch, tmp_path):
+    """The first real run lost everything to one failed call: now that case is listed, the rest scored."""
+    import pacer.evaluation.__main__ as cli
+    from pacer.ai import LLMUnavailableError
+
+    add(repos, TITLE, [("עשרים וחמשה תינוקות למלמד אחד", [1.0, 0.0])])
+
+    def flaky(message: str) -> str:
+        if "CHECKLIST:" in message:
+            raise LLMUnavailableError("overloaded")
+        return fake_model(message)
+
+    client = FakeLLMClient(answers=flaky, runs_locally=False)
+    models = models | {"claude-sonnet": ModelSpec(runs_locally=False, make_client=lambda: client)}
+    monkeypatch.setattr(cli, "_uow", lambda: FakeUnitOfWork(repos))
+    monkeypatch.setattr(cli, "router_for", lambda model: router_for(model, models=models))
+    monkeypatch.setattr(cli, "ollama_embedder", lambda name: VectorEmbedder([1.0, 0.0]))
+    monkeypatch.setattr(cli, "DEFAULT_CHUNKING", CHUNKING)
+    out = tmp_path / "eval.md"
+    cli.main(["run", "--limit", "1", "--out", str(out)])
+
+    summary = json.loads(out.with_suffix(".json").read_text(encoding="utf-8"))
+    assert summary["library"] is None and summary["failed"][0].startswith("L01: LLMUnavailableError")
+    assert set(summary["talks"]) == {"masked", "words"}  # the talks still ran
+    assert "נכשלו (1)" in out.read_text(encoding="utf-8")
+
+
+def test_the_retry_library_litellm_needs_is_installed():
+    """LiteLLM retries a failed call with tenacity, which it does not install itself. Without it the
+    first transient error (an overloaded model) became 'tenacity import failed', and the run crashed."""
+    import importlib
+
+    importlib.import_module("tenacity")
