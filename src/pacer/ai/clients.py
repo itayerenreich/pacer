@@ -12,12 +12,20 @@ DEFAULT_CLAUDE_MODEL = "claude-haiku-5-5"  # fast and cheap; the router picks pe
 DEFAULT_LOCAL_MODEL = "llama3.2"  # small enough for a 16 GB laptop without a GPU
 
 
+# Models whose native JSON schema request fails through LiteLLM 1.104: for a model missing from its
+# table, LiteLLM asks for JSON by FORCING a tool, and these models reject forced tools ("tool_choice:
+# type tool is not supported for this model", the first evaluation run, 2026-10-19). For them the
+# schema goes in the message instead, and Pydantic validates the answer (one correction attempt).
+NO_NATIVE_SCHEMA = frozenset({"claude-sonnet-5-5"})
+
+
 def claude_client(model: str = DEFAULT_CLAUDE_MODEL) -> LiteLLMClient:
     """A Claude model in Anthropic's cloud. Data sent here LEAVES this computer."""
     key = get_ai_settings().anthropic_api_key
     if key is None or not key.get_secret_value().strip():
         raise LLMConfigError("ANTHROPIC_API_KEY is missing. Add it to .env (never to Git).")
-    return LiteLLMClient(f"anthropic/{model}", runs_locally=False, api_key=key)
+    native = False if model in NO_NATIVE_SCHEMA else None  # None: as LiteLLM's table says
+    return LiteLLMClient(f"anthropic/{model}", runs_locally=False, api_key=key, native_schema=native)
 
 
 def ollama_client(model: str = DEFAULT_LOCAL_MODEL, *, temperature: float | None = 0.2) -> LiteLLMClient:

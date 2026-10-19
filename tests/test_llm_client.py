@@ -189,3 +189,17 @@ def test_clients_declare_where_the_data_goes(monkeypatch):
         assert ollama_client().runs_locally is True
     finally:
         get_ai_settings.cache_clear()
+
+
+def test_sonnet_gets_the_schema_in_the_message_not_as_a_forced_tool(monkeypatch, sent):
+    """The first evaluation run: through LiteLLM, a native schema for claude-sonnet-5-5 became a forced
+    tool, which the model rejects. Its schema goes in the message; Haiku keeps the native one."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    get_ai_settings.cache_clear()
+    try:
+        sonnet, haiku = claude_client("claude-sonnet-5-5"), claude_client("claude-haiku-5-5")
+    finally:
+        get_ai_settings.cache_clear()
+    assert sonnet.native_schema is False and haiku.native_schema is True
+    sonnet.complete(PROMPT, "שלום", response_schema={"type": "object"})
+    assert "response_format" not in sent.requests[-1] and "tools" not in sent.requests[-1]

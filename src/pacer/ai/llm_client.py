@@ -137,11 +137,15 @@ class LiteLLMClient:
         temperature: float | None = None,
         timeout_s: float = 60,
         retries: int = 2,
+        native_schema: bool | None = None,
     ) -> None:
         self.model = model
         self.runs_locally = runs_locally
         # Known once, from litellm's bundled model table (no network): Claude yes, llama3.2 no.
-        self.native_schema = bool(litellm.supports_response_schema(model=model))
+        # native_schema=False overrides it: the schema then goes in the message, and Pydantic validates.
+        self.native_schema = (
+            bool(litellm.supports_response_schema(model=model)) if native_schema is None else native_schema
+        )
         self._api_key = api_key
         self._api_base = api_base
         self._temperature = temperature
