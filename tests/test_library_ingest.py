@@ -14,6 +14,7 @@ from fakes import FakeUnitOfWork, empty_repos
 from pacer.ai.embeddings import for_embedding
 from pacer.ai.library import index_library, search_library
 from pacer.domain import EvidenceLevel
+from pacer.evaluation import load_library_set, unknown_sources
 from pacer.library.chunking import SUMMARY, Unit, fixed, label_of, structure
 from pacer.library.clean import clean_blocks, clean_text
 from pacer.library.extract import Block, ExtractionError, extract
@@ -175,8 +176,8 @@ def test_the_repo_manifest_for_the_classics_is_valid():
     data = json.loads(Path("library/classics.json").read_text(encoding="utf-8"))
     m = Manifest.model_validate(data)
     assert len(m.sources) == 5 and all(s.evidence_level is EvidenceLevel.TRADITION for s in m.sources)
-    questions = json.loads(Path("library/questions-classics.json").read_text(encoding="utf-8"))["questions"]
-    assert {e for q in questions for e in q["expected"]} <= {s.title for s in m.sources}  # every answer is a real source
+    eval_set = load_library_set(Path("evals/library-v1.json"))
+    assert unknown_sources(eval_set, {s.title for s in m.sources}) == []  # every answer is a real source
 
 
 # --- import, index, search ----------------------------------------------------------------------------
@@ -225,9 +226,14 @@ def test_import_index_and_compare_against_postgresql(sample, engine, monkeypatch
     import_file(uow, sample, manifest())
     index_library(uow, FakeEmbedder("bge-m3"), "structure-220")
     questions = tmp_path / "q.json"
-    questions.write_text(json.dumps({"questions": [{"question": "כמה תינוקות למלמד אחד?", "expected": ["הלכות תלמוד תורה פרק ב'"]}]}, ensure_ascii=False), encoding="utf-8")
+    cases = [
+        {"id": "L01", "question": "כמה תינוקות למלמד אחד?", "kind": "about_source",
+         "sources": ["הלכות תלמוד תורה פרק ב'"], "coverage": ["direct"]},
+        {"id": "L02", "question": "איך מגדירים את הרשת האלחוטית?", "kind": "off_topic", "sources": [], "coverage": ["none"]},
+    ]
+    questions.write_text(json.dumps({"name": "t", "version": 1, "about": "test", "cases": cases}, ensure_ascii=False), encoding="utf-8")
     report = cli.compare(questions, ["bge-m3"], ["structure-220"])
-    assert "| bge-m3 | structure-220 | 1/1 | 1/1 | 1.00 |" in report
+    assert "| bge-m3 | structure-220 | 1/1 | 1/1 | 1.00 |" in report and "(t@v1)" in report
 
 
 def test_a_report_written_to_a_file_reads_right_to_left_in_a_markdown_preview(sample, tmp_path, capsys):

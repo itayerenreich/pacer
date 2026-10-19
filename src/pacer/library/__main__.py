@@ -4,7 +4,7 @@ uv run python -m pacer.library preview data/library/classics.docx --manifest lib
 uv run python -m pacer.library import  data/library/classics.docx --manifest library/classics.json
 uv run python -m pacer.library index                      # every embedding model, every chunking strategy
 uv run python -m pacer.library search "השאלה שלך" --model bge-m3
-uv run python -m pacer.library compare library/questions-classics.json --out data/library-report.md
+uv run python -m pacer.library compare evals/library-v1.json --out data/library-report.md
 
 preview needs no database and no model: it shows how the file would be split. index and search need
 Ollama running with the models pulled (ollama pull bge-m3, ollama pull qwen3-embedding:0.6b).
@@ -16,11 +16,11 @@ uv run python -m pacer.library ask "השאלה שלך" --send --out data/answer.
 """
 
 import argparse
-import json
 from pathlib import Path
 
 from pacer.ai.embeddings import EMBEDDING_MODELS, ollama_embedder
 from pacer.ai.library import index_library, search_library
+from pacer.evaluation.library_set import CaseKind, load_library_set
 from pacer.logging_config import configure_logging, use_utf8_console
 from pacer.repositories import ScoredChunk, get_engine, repositories
 
@@ -51,17 +51,19 @@ def _hit_line(rank: int, hit: ScoredChunk) -> str:
     return f"{rank}. **{hit.similarity:.3f}** {hit.source.citation}{place}\n   > {start}…"
 
 
-def compare(questions_file: Path, models: list[str], chunkings: list[str], k: int = 3) -> str:
-    """Every question, with every model and chunking: is a right source at the top?
-    A question lists every source that answers it ("expected"); the best-placed one counts.
-    hit@1: in first place. hit@3: among the first three. MRR: 1 for first place, 1/2 for second..."""
-    every = json.loads(questions_file.read_text(encoding="utf-8"))["questions"]
-    questions = [q for q in every if q["expected"]]
-    off_topic = [q for q in every if not q["expected"]]
+def compare(eval_file: Path, models: list[str], chunkings: list[str], k: int = 3) -> str:
+    """Every case, with every model and chunking: is a right source at the top?
+    A case lists every source that answers it; the best-placed one counts.
+    hit@1: in first place. hit@3: among the first three. MRR: 1 for first place, 1/2 for second...
+    Cases with no source calibrate the floor: off-topic ones, and the harder ones close to the library."""
+    eval_set = load_library_set(eval_file)
+    questions = [c for c in eval_set.cases if c.has_source]
+    no_source = [c for c in eval_set.cases if not c.has_source]
     uow = _uow()
     table = [
-        "| מודל | חלוקה | hit@1 | hit@3 | MRR | ציון שאלה נכונה (הכי נמוך) | ציון שאלה לא קשורה (הכי גבוה) |",
-        "|---|---|---|---|---|---|---|",
+        "| מודל | חלוקה | hit@1 | hit@3 | MRR | מקור נכון (הכי נמוך) | לא קשורה (הכי גבוה) "
+        "| קרובה בלי מקור (הכי גבוה) |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     details: list[str] = []
     for model in models:
@@ -72,35 +74,39 @@ def compare(questions_file: Path, models: list[str], chunkings: list[str], k: in
             right_scores: list[float] = []  # the best score of a right source, per question
             details += [f"## {model} · {chunking}", ""]
             for q in questions:
-                hits = search_library(uow, embedder, chunking, q["question"], k=max(k, 10))
+                hits = search_library(uow, embedder, chunking, q.question, k=max(k, 10))
                 titles = list(dict.fromkeys(h.source.title for h in hits))  # sources, best first
-                ranks = [titles.index(e) + 1 for e in q["expected"] if e in titles]
+                ranks = [titles.index(e) + 1 for e in q.sources if e in titles]
                 rank = min(ranks) if ranks else None
-                right = [h.similarity for h in hits if h.source.title in q["expected"]]
+                right = [h.similarity for h in hits if h.source.title in q.sources]
                 if right:
                     right_scores.append(max(right))
                 hit1 += rank == 1
                 hit3 += rank is not None and rank <= 3
                 reciprocal += 1 / rank if rank else 0.0
                 mark = "✓" if rank == 1 else (f"מקום {rank}" if rank else "✗ לא נמצא")
-                details += [f"**{q['question']}** · צפוי: {' / '.join(q['expected'])} · {mark}", ""]
+                details += [f"**{q.id} {q.question}** · צפוי: {' / '.join(q.sources)} · {mark}", ""]
                 details += [_hit_line(i, h) for i, h in enumerate(hits[:k], start=1)] + [""]
-            off_scores = []
-            for q in off_topic:
-                hits = search_library(uow, embedder, chunking, q["question"], k=k)
-                off_scores.append(hits[0].similarity if hits else 0.0)
-                details += [f"**{q['question']}** · לא אמור להימצא כלום", ""]
+            best_by_kind: dict[CaseKind, list[float]] = {}
+            for q in no_source:
+                hits = search_library(uow, embedder, chunking, q.question, k=k)
+                best_by_kind.setdefault(q.kind, []).append(hits[0].similarity if hits else 0.0)
+                details += [f"**{q.id} {q.question}** · ({q.kind}) לא אמור להימצא כלום", ""]
                 details += [_hit_line(i, h) for i, h in enumerate(hits[:1], start=1)] + [""]
             n = len(questions)
-            lowest_right = f"{min(right_scores):.3f}" if right_scores else "-"
-            highest_off = f"{max(off_scores):.3f}" if off_scores else "-"
-            scores = f"{reciprocal / n:.2f} | {lowest_right} | {highest_off}"
-            table.append(f"| {model} | {chunking} | {hit1}/{n} | {hit3}/{n} | {scores} |")
+            off = best_by_kind.get(CaseKind.OFF_TOPIC, [])
+            near = best_by_kind.get(CaseKind.HARD_NEGATIVE, []) + best_by_kind.get(CaseKind.SAFETY, [])
+            scores = " | ".join(f"{v:.3f}" if v is not None else "-" for v in (
+                min(right_scores, default=None), max(off, default=None), max(near, default=None)
+            ))
+            table.append(f"| {model} | {chunking} | {hit1}/{n} | {hit3}/{n} | {reciprocal / n:.2f} | {scores} |")
     note = (
-        "הסף (min_similarity) צריך לעבור בין שתי העמודות האחרונות: מעל הציון הגבוה של שאלה לא קשורה, "
-        "ומתחת לציון הנמוך של מקור נכון. אם הן חופפות, אין סף שמפריד, וזה ממצא בפני עצמו."
+        "הסף (min_similarity) צריך לעבור מתחת לציון הנמוך של מקור נכון, ומעל הציון הגבוה של שאלה בלי מקור. "
+        "שאלה לא קשורה קלה להפריד; שאלה קרובה בלי מקור היא המבחן האמיתי. אם הציונים חופפים, אין סף שמפריד, "
+        "וזה ממצא בפני עצמו: אז ההחלטה עוברת למודל העונה (coverage: none)."
     )
-    return "\n".join(["# השוואת חיפוש: מודלים ושיטות חלוקה", "", *table, "", note, "", *details])
+    title = f"# השוואת חיפוש: מודלים ושיטות חלוקה ({eval_set.ref})"
+    return "\n".join([title, "", *table, "", note, "", *details])
 
 
 COVERAGE_LABELS = {
