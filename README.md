@@ -105,6 +105,30 @@ First run, Claude Haiku answering, Claude Sonnet judging (`library@v1`, 23 quest
 > second model that checks the first one's RAG against an answer key, so every change (a prompt,
 > a model, a source) can be measured instead of guessed.
 
+### A commercial model or an open one on this laptop?
+
+The same evaluation, run on the first 4 library questions and 4 talks, with Claude Haiku (cloud) and
+gemma3:4b (open, through Ollama, on a 16 GB laptop with no GPU), Claude Sonnet judging both:
+
+| | Claude Haiku | gemma3:4b, local |
+|---|---|---|
+| claims supported by the passage they cite | 95% | 50% |
+| a right source cited | 100% | 75% |
+| usefulness (judge, 1-5) | 3.25 | 1.75 |
+| talk summaries: goal progress in the expected range | 100% | 0% |
+| talk summaries: expected notes found | 100% | 89% |
+| seconds per answer / per talk | 17 / 4 | 109 / 118 |
+
+The local model kept every name on the computer, and failed the task: it overstated progress (two
+remarks in a group talk became 67% of a goal), skipped goals the talk was about, and once turned
+"his younger brother" into "his younger sister". On this hardware, the evidence for anything written
+into a trainee's file points to the stronger model, with privacy kept in code (names anonymized, health
+details removed, the router refusing personal data to the cloud). Two technical findings on
+the way: Ollama silently cuts a message longer than its default 2,048-token context, and a small
+model broke its JSON on Hebrew abbreviations (רמב"ם) until Ollama was asked to enforce the schema.
+Four cases are few, and a larger open model on a GPU could do far better: the runner can measure it
+(`--model`, `python -m pacer.evaluation compare`).
+
 ## Stack
 
 Python 3.12 · uv · FastAPI · Pydantic · SQLAlchemy 2 · PostgreSQL 17 · Alembic · Docker ·
@@ -164,6 +188,6 @@ CI runs ruff, mypy and the full suite on every pull request.
 | 1. Data layer | domain models, PostgreSQL, migrations, repositories | done |
 | 2. Logic and API | services, roles, approvals, REST API, demo data, CI | done |
 | 3. AI core | LLM client, model routing, anonymization, meeting pipeline, talk summaries | done |
-| 4. Knowledge and quality | a curated library, RAG with citations, evaluation set, open vs commercial models | in progress |
+| 4. Knowledge and quality | a curated library, RAG with citations, evaluation set, open vs commercial models | done |
 | 5. Counselor coach | case guidance grounded only in the library, safety layer, hybrid local/cloud pipeline | planned |
 | 6. Assistant and UI | tool-using agent, staff interface, demo | planned |
