@@ -28,7 +28,14 @@ def claude_client(model: str = DEFAULT_CLAUDE_MODEL) -> LiteLLMClient:
     return LiteLLMClient(f"anthropic/{model}", runs_locally=False, api_key=key, native_schema=native)
 
 
-def ollama_client(model: str = DEFAULT_LOCAL_MODEL, *, temperature: float | None = 0.2) -> LiteLLMClient:
+# Ollama's default context window is 2,048 tokens, and it CUTS a longer message without an error. A
+# library question with five passages, or a talk with its goals and the JSON schema, is longer.
+LOCAL_CONTEXT_TOKENS = 8192
+
+
+def ollama_client(
+    model: str = DEFAULT_LOCAL_MODEL, *, temperature: float | None = 0.2, context_tokens: int = LOCAL_CONTEXT_TOKENS
+) -> LiteLLMClient:
     """An open model served by Ollama on this computer. Data stays local.
 
     Open models accept a temperature; a low one makes their answers steadier.
@@ -38,6 +45,7 @@ def ollama_client(model: str = DEFAULT_LOCAL_MODEL, *, temperature: float | None
         runs_locally=True,
         api_base=get_ai_settings().ollama_base_url,
         temperature=temperature,
-        timeout_s=180,  # a CPU-only laptop is slow, especially on the first call (model loading)
+        timeout_s=600,  # a CPU-only laptop: minutes for a long answer, more on the first call (loading)
         retries=0,  # if Ollama is down, retrying won't help: fail fast with a clear message
+        options={"num_ctx": context_tokens},
     )

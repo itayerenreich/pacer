@@ -138,6 +138,7 @@ class LiteLLMClient:
         timeout_s: float = 60,
         retries: int = 2,
         native_schema: bool | None = None,
+        options: dict[str, Any] | None = None,
     ) -> None:
         self.model = model
         self.runs_locally = runs_locally
@@ -151,6 +152,7 @@ class LiteLLMClient:
         self._temperature = temperature
         self._timeout_s = timeout_s
         self._retries = retries
+        self._options = dict(options or {})  # provider-specific settings, e.g. Ollama's num_ctx
 
     def complete(
         self,
@@ -204,6 +206,7 @@ class LiteLLMClient:
         }
         if self._temperature is not None:
             request["temperature"] = self._temperature
+        request.update(self._options)
         if response_schema is not None and self.native_schema:
             # The provider constrains the answer to this shape. For Anthropic, litellm also removes
             # the keywords Claude rejects (minLength, maximum...) and keeps them as descriptions.

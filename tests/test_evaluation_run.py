@@ -392,3 +392,26 @@ def test_the_notes_judge_may_answer_with_the_labels_it_was_shown(repos):
         proposed=[(NoteKind.WORKED, "שעון מעורר רחוק מהמיטה")],
     )
     assert grade.matches == [0, None]
+
+
+def test_runs_are_compared_side_by_side_and_a_self_judged_one_is_flagged(tmp_path):
+    from pacer.evaluation.__main__ import compare_runs
+
+    def run_file(model: str, cited: float, sets=("library@v1", "talks@v1")) -> Path:
+        summary = {
+            "model": model,
+            "judge": "claude-sonnet",
+            "sets": list(sets),
+            "library": {"cited_right": cited, "helpful": 3.0},
+            "talks": {"masked": {"required_in_range": 1.0}},
+            "failed": [],
+        }
+        path = tmp_path / f"{model}.json"
+        path.write_text(json.dumps(summary), encoding="utf-8")
+        return path
+
+    table = compare_runs([run_file("claude-haiku", 0.94), run_file("gemma3-4b", 0.5)])
+    assert "| | claude-haiku | gemma3-4b |" in table and "| מקור נכון צוטט | 94% | 50% |" in table
+    assert "| שיחות: מטרות בטווח | 100% | 100% |" in table and "שופט את עצמו" not in table
+    flagged = compare_runs([run_file("claude-sonnet", 0.9), run_file("x", 0.9, sets=("library@v2",))])
+    assert "שופט את עצמו" in flagged and "לא הוגנת" in flagged

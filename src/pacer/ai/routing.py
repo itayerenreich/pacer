@@ -72,6 +72,9 @@ MODELS: Mapping[str, ModelSpec] = MappingProxyType(
             runs_locally=False, make_client=lambda: claude_client("claude-sonnet-5-5")
         ),
         "local-small": ModelSpec(runs_locally=True, make_client=lambda: ollama_client("llama3.2")),
+        # Stage 4, task 9: the open model compared with Claude. Chosen for Itay's laptop (16 GB, no GPU):
+        # about 3 GB, multilingual, no "thinking" mode to slow every answer. ollama pull gemma3:4b
+        "gemma3-4b": ModelSpec(runs_locally=True, make_client=lambda: ollama_client("gemma3:4b")),
     }
 )
 

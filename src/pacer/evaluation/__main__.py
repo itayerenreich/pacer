@@ -4,6 +4,7 @@ uv run python -m pacer.evaluation check                               # are the 
 uv run python -m pacer.evaluation masking --out data/masking-report.md  # anonymization vs the answer key
 uv run python -m pacer.evaluation run --out data/eval-claude-haiku.md     # REAL models: costs about $1
 uv run python -m pacer.evaluation run --model claude-sonnet --only talks --limit 2 --out data/try.md
+uv run python -m pacer.evaluation compare data/eval-*.json --out data/models.md  # runs, side by side
 
 check and masking need no model. run needs ANTHROPIC_API_KEY, and Ollama for the embeddings (bge-m3).
 All read the academy from the database in .env (the demo academy: python -m pacer.demo). run writes the
@@ -195,6 +196,58 @@ def run(model: str, *, only: str | None, limit: int | None, baseline: bool, judg
     return report, summaries
 
 
+# What the comparison shows, in order: (label, section, key, format).
+COMPARED: list[tuple[str, str, str, str]] = [
+    ("מקור נכון צוטט", "library", "cited_right", "pct"),
+    ("טענות שהקטע שלהן אומר אותן", "library", "claims_supported", "pct"),
+    ("הכיסוי שדווח נכון", "library", "coverage_ok", "pct"),
+    ("סעיפי בדיקה, עם הספרייה", "library", "checklist", "pct"),
+    ("סעיפי בדיקה, בלי", "library", "checklist_baseline", "pct"),
+    ("מועילות, עם הספרייה (1-5)", "library", "helpful", "num"),
+    ("מועילות, בלי (1-5)", "library", "helpful_baseline", "num"),
+    ("שניות לתשובה", "library", "seconds_per_answer", "num"),
+    ("עלות, ספרייה ($)", "library", "cost_usd", "num"),
+    ("שיחות: מטרות בטווח", "talks.masked", "required_in_range", "pct"),
+    ("שיחות: הערות צפויות שנמצאו", "talks.masked", "notes_found", "pct"),
+    ("שיחות: פרט רפואי בהצעה", "talks.masked", "forbidden_found", "num"),
+    ("שיחות: שניות לשיחה", "talks.masked", "seconds_per_talk", "num"),
+]
+
+
+def compare_runs(files: list[Path]) -> str:
+    """The JSON summaries of several runs (one per answering model), as one table."""
+    runs = [json.loads(f.read_text(encoding="utf-8")) for f in files]
+
+    def value(run: dict, section: str, key: str, kind: str) -> str:
+        part = run
+        for name in section.split("."):
+            part = (part or {}).get(name) or {}
+        v = part.get(key)
+        if v is None:
+            return "-"
+        return f"{v:.0%}" if kind == "pct" else str(v)
+
+    lines = [
+        "# השוואת מודלים",
+        "",
+        "| | " + " | ".join(r["model"] for r in runs) + " |",
+        "|---|" + "---|" * len(runs),
+    ]
+    lines += [f"| {label} | " + " | ".join(value(r, *where) for r in runs) + " |" for label, *where in COMPARED]
+    judges = {r["model"]: r.get("judge") for r in runs}
+    notes = [
+        f"- {m}: השופט {j}" + (" (שופט את עצמו: הציונים עלולים להיות מוטים)" if m == j else "")
+        for m, j in judges.items()
+    ]
+    sets = {tuple(r["sets"]) for r in runs}
+    if len(sets) > 1:
+        notes.append("- **שים לב:** ההרצות לא נעשו על אותם סטים, ולכן ההשוואה לא הוגנת.")
+    failed = [f"{r['model']}: {len(r.get('failed') or [])}" for r in runs if r.get("failed")]
+    if failed:
+        notes.append("- מקרים שנכשלו ולא נכללים: " + ", ".join(failed))
+    return "\n".join([*lines, "", *notes])
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="python -m pacer.evaluation", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -210,6 +263,9 @@ def main(argv: list[str] | None = None) -> None:
     running.add_argument("--no-baseline", action="store_true", help="skip answering without the library")
     running.add_argument("--no-judge", action="store_true", help="skip the judge (code checks only)")
     running.add_argument("--out", type=Path, required=True, help="the report; the JSON summary goes next to it")
+    comparing = commands.add_parser("compare", help="the JSON summaries of several runs, side by side")
+    comparing.add_argument("files", type=Path, nargs="+")
+    comparing.add_argument("--out", type=Path)
     args = parser.parse_args(argv)
 
     use_utf8_console()
@@ -219,6 +275,8 @@ def main(argv: list[str] | None = None) -> None:
         report = check()
     elif args.command == "masking":
         report = masking()
+    elif args.command == "compare":
+        report = compare_runs(args.files)
     else:
         report, summaries = run(
             args.model, only=args.only, limit=args.limit, baseline=not args.no_baseline, judge=not args.no_judge
