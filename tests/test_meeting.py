@@ -26,6 +26,7 @@ def meeting(**overrides) -> StaffMeeting:
         "held_on": date(2026, 10, 12),
         "created_by_id": 1,
         "participant_ids": [1, 2, 3],
+        "transcript": TRANSCRIPT,
     }
     data.update(overrides)
     return StaffMeeting(**data)
@@ -49,9 +50,10 @@ def test_a_step_cannot_be_skipped():
 
 
 def test_each_status_requires_its_field():
-    """You cannot claim 'anonymized' without the anonymized text, or 'extracted' without a summary."""
-    with pytest.raises(ValidationError, match="must have a transcript"):
-        meeting(status=M.TRANSCRIBED)
+    """No meeting without its text, and no 'anonymized' without the anonymized text."""
+    with pytest.raises(ValidationError, match="transcript"):
+        meeting(transcript=None)
+    assert meeting().status is M.TRANSCRIBED  # a meeting starts with its text
     with pytest.raises(ValidationError, match="must have a anonymized_transcript"):
         meeting(status=M.TRANSCRIBED, transcript=TRANSCRIPT).advance(M.ANONYMIZED)
 

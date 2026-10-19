@@ -1,7 +1,6 @@
 """Application settings, read from environment variables and the .env file."""
 
 from functools import lru_cache
-from pathlib import Path
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -50,9 +49,6 @@ class AISettings(BaseSettings):
 
     anthropic_api_key: SecretStr | None = None  # ANTHROPIC_API_KEY in .env, never in Git
     ollama_base_url: str = "http://localhost:11434"
-    # Audio (optional: uv sync --extra audio). Recordings wait here until transcribed, then are deleted.
-    whisper_model: str = "ivrit-ai/whisper-large-v3-turbo-ct2"  # WHISPER_MODEL=small for a quick try
-    recordings_dir: Path = Path("data/recordings")  # outside Git (.gitignore)
 
 
 @lru_cache

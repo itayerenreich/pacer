@@ -4,23 +4,20 @@ import json
 from collections.abc import Iterator
 
 import pytest
-from fake_llm import FakeLLMClient, FakeTranscriber, fake_router
+from fake_llm import FakeLLMClient, fake_router
 from fakes import FakeUnitOfWork, empty_repos
 from fastapi.testclient import TestClient
 from test_meeting_pipeline import WEEKLY_ANSWER
 
 from pacer.ai import LLMConfigError
-from pacer.ai.transcription import RecordingStore
 from pacer.api.app import create_app
 from pacer.api.dependencies import (
     get_ai_router,
     get_db_engine,
     get_meeting_repository,
     get_proposal_repository,
-    get_recordings,
     get_staff_repository,
     get_task_repository,
-    get_transcriber,
     get_unit_of_work,
 )
 from pacer.demo import build_academy
@@ -41,8 +38,6 @@ class Setup:
         build_academy(self.repos)
         self.uow = FakeUnitOfWork(self.repos)
         self.cloud = FakeLLMClient(answers=[json.dumps(WEEKLY_ANSWER, ensure_ascii=False)], runs_locally=False)
-        self.transcriber: FakeTranscriber | None = FakeTranscriber(text=WEEKLY.transcript)
-        self.recordings = RecordingStore(tmp_path / "recordings")
 
 
 @pytest.fixture
@@ -60,8 +55,6 @@ def client(setup) -> Iterator[TestClient]:
         get_db_engine: no_database,
         get_unit_of_work: lambda: setup.uow,
         get_ai_router: lambda: fake_router(setup.cloud),
-        get_transcriber: lambda: setup.transcriber,
-        get_recordings: lambda: setup.recordings,
         # the plain endpoints (create, approve) use the request's repositories
         get_staff_repository: lambda: setup.repos.staff,
         get_meeting_repository: lambda: setup.repos.meetings,
@@ -152,46 +145,3 @@ def test_a_missing_api_key_is_503_with_a_fixed_message(client, setup):
     response = client.post(f"/meetings/{create(client)}/process", headers=MANAGER)
     assert response.status_code == 503
     assert "provider text" not in response.json()["detail"]
-
-
-# --- audio ---------------------------------------------------------------------------------------
-
-
-def upload(client, meeting_id: int, filename: str = "meeting.m4a", data: bytes = b"audio-bytes", headers=MANAGER):
-    return client.post(
-        f"/meetings/{meeting_id}/audio", files={"recording": (filename, data, "audio/mp4")}, headers=headers
-    )
-
-
-def test_upload_then_process_transcribes_and_deletes_the_recording(client, setup):
-    meeting_id = create(client, transcript=None)
-    response = upload(client, meeting_id)
-    assert response.status_code == 201 and response.json() == {"meeting_id": meeting_id, "size_bytes": 11}
-    assert setup.recordings.find(meeting_id) is not None
-
-    body = client.post(f"/meetings/{meeting_id}/process", headers=MANAGER).json()
-    assert body["meeting"]["status"] == "pending_approval"
-    assert setup.recordings.find(meeting_id) is None
-
-
-def test_a_file_that_is_not_audio_is_422(client):
-    assert upload(client, create(client, transcript=None), filename="notes.txt").status_code == 422
-
-
-def test_a_counselor_cannot_upload_403(client, setup):
-    meeting_id = create(client, transcript=None)
-    assert upload(client, meeting_id, headers=COUNSELOR).status_code == 403
-    assert setup.recordings.find(meeting_id) is None
-
-
-def test_without_transcription_installed_uploads_are_409(client, setup):
-    setup.transcriber = None
-    response = upload(client, create(client, transcript=None))
-    assert response.status_code == 409
-    assert "upload a transcript" in response.json()["detail"]
-
-
-def test_processing_before_any_recording_is_409(client):
-    response = client.post(f"/meetings/{create(client, transcript=None)}/process", headers=MANAGER)
-    assert response.status_code == 409
-    assert "upload one first" in response.json()["detail"]

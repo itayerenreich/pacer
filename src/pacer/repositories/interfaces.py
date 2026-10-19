@@ -4,16 +4,19 @@ Services depend on these, not on the SQLAlchemy classes. Any object with the
 same methods fits, so service tests can pass a simple in-memory fake.
 """
 
+from dataclasses import dataclass
 from typing import Protocol
 
 from pacer.domain import (
     ApprovalKind,
     ApprovalRequest,
     ApprovalStatus,
+    Chunk,
     Cohort,
     Goal,
     GoalUpdate,
     Group,
+    KnowledgeSource,
     PersonalFile,
     PersonalTalk,
     ProposedTask,
@@ -131,3 +134,32 @@ class TraineeNoteRepo(Protocol):
     def get(self, note_id: int) -> TraineeNote | None: ...
     def delete(self, note_id: int) -> None: ...
     def list_by_trainee(self, trainee_id: int) -> list[TraineeNote]: ...
+
+
+class KnowledgeSourceRepo(Protocol):
+    def add(self, source: KnowledgeSource) -> KnowledgeSource: ...
+    def get(self, source_id: int) -> KnowledgeSource | None: ...
+    def list_all(self) -> list[KnowledgeSource]: ...
+    def delete(self, source_id: int) -> None: ...
+
+
+@dataclass(frozen=True)
+class ScoredChunk:
+    """A search hit: the chunk, its source, and how close it is to the query (cosine similarity:
+    1 means the same direction, 0 unrelated)."""
+
+    chunk: Chunk
+    source: KnowledgeSource
+    similarity: float
+
+
+class ChunkRepo(Protocol):
+    def add_many(self, chunks: list[Chunk]) -> list[Chunk]: ...
+    def get_many(self, chunk_ids: list[int]) -> list[Chunk]: ...
+    def list_by_source(self, source_id: int, chunking: str) -> list[Chunk]: ...
+    def delete_by_source(self, source_id: int, chunking: str) -> int: ...
+    def save_embeddings(self, model: str, vectors: dict[int, list[float]]) -> None: ...
+    def missing_embeddings(self, model: str, chunking: str) -> list[Chunk]: ...
+    def search(
+        self, model: str, chunking: str, query: list[float], *, k: int, cloud_safe_only: bool = False
+    ) -> list[ScoredChunk]: ...

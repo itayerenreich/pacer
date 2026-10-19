@@ -53,8 +53,7 @@ class ApprovalStatus(StrEnum):
 class MeetingStatus(StrEnum):
     """Where a staff meeting is in the AI pipeline (task 6 moves it along)."""
 
-    UPLOADED = "uploaded"  # audio received, not transcribed yet
-    TRANSCRIBED = "transcribed"  # we have the text (or it was uploaded as text)
+    TRANSCRIBED = "transcribed"  # we have the text of the meeting (typed or pasted by the manager)
     ANONYMIZED = "anonymized"  # names replaced by tokens
     EXTRACTED = "extracted"  # the model proposed a summary and tasks
     PENDING_APPROVAL = "pending_approval"  # proposals validated, waiting for the manager

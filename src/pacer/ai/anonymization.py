@@ -40,7 +40,7 @@ lets later stages map a model's answer ("owner: [STAFF_2]") straight back to a s
 
 import re
 from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
@@ -73,6 +73,9 @@ _WORD = re.compile(r"[^\W\d_](?:[^\W\d_]|['׳’`´\"״“”])*")
 # Characters that are written in several ways, and the one form we compare by.
 _VARIANTS = {"'": "'׳’`´", '"': '"״“”'}
 _CANONICAL = {variant: canonical for canonical, variants in _VARIANTS.items() for variant in variants}
+# Where a span a person marked as a word waits while names are replaced: private-use characters and a
+# number. No letters in it, so no name can match it or across it.
+_WORD_SLOT = re.compile("\ue000(\\d+)\ue001")
 
 
 def _clean(text: str) -> str:
@@ -216,7 +219,12 @@ class Anonymizer:
         self._roster = roster
 
     def anonymize(
-        self, text: str, *, known: Iterable[Person] = (), prefer: Iterable[Person] = ()
+        self,
+        text: str,
+        *,
+        known: Iterable[Person] = (),
+        prefer: Iterable[Person] = (),
+        words: Sequence[tuple[int, int]] = (),
     ) -> AnonymizedText:
         """known:  people the model is told about by token even if the text never names them
                    (e.g. the participants of a meeting), so their tokens in the answer map back.
@@ -224,12 +232,17 @@ class Anonymizer:
                 is preferred, it is that one (in a talk with Yael Mizrahi, "יעל" is her, not the
                 other Yael). Otherwise an ambiguous name still gets a neutral [NAME_n] token.
         A name that is also a common word (COMMON_WORD_NAMES) is a person only when exactly one
-        person in the context (known + prefer) has it; otherwise it gets a neutral [NAME_n]."""
+        person in the context (known + prefer) has it; otherwise it gets a neutral [NAME_n].
+        words:  spans (start, end) of `text` that a PERSON marked as words, not names ("טיול לאגם",
+                to the lake). They are left as written, and the final name check runs without them:
+                a person decided. Nothing in code marks a span by itself (used by the evaluation, to
+                measure what over-masking costs)."""
         people: dict[str, Person] = {person.token: person for person in known}
         preferred = frozenset(prefer)
         context = set(preferred) | set(people.values())  # grows with every name resolved in full
         unresolved: dict[str, str] = {}
         ambiguous_tokens: dict[str, str] = {}  # the same ambiguous word gets the same token
+        text, marked_words = _set_aside(text, words)
         text = _clean(text)
 
         def resolve(match: re.Match) -> Person | None:
@@ -271,6 +284,8 @@ class Anonymizer:
         result = self._roster.pattern.sub(replace, text)
         if self.contains_known_name(result):  # defense in depth, with an independent check too
             raise AnonymizationError("A known name is still present after anonymization")
+        if marked_words:  # the marked words, back in their slots
+            result = _WORD_SLOT.sub(lambda m: marked_words[int(m[1])], result)
         return AnonymizedText(
             text=result,
             people=MappingProxyType(people),
@@ -283,6 +298,22 @@ class Anonymizer:
         word-by-word lookup that does not use it (Roster.has_name_in)."""
         cleaned = _clean(text)
         return self._roster.pattern.search(cleaned) is not None or self._roster.has_name_in(cleaned)
+
+
+def _set_aside(text: str, spans: Sequence[tuple[int, int]]) -> tuple[str, list[str]]:
+    """The text with each marked span replaced by a numbered slot, and the spans' words in order."""
+    if spans and _WORD_SLOT.search(text):  # a slot already in the text would take a marked word's place
+        raise ValueError("The text contains the characters used to set words aside")
+    pieces: list[str] = []
+    marked: list[str] = []
+    last = 0
+    for start, end in sorted(spans):
+        if not 0 <= last <= start < end <= len(text):
+            raise ValueError(f"Marked words must be inside the text and not overlap: {start}-{end}")
+        pieces += [text[last:start], f"\ue000{len(marked)}\ue001"]
+        marked.append(text[start:end])
+        last = end
+    return "".join(pieces) + text[last:], marked
 
 
 def deanonymize(text: str, source: AnonymizedText) -> str:

@@ -16,6 +16,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from pacer.ai.answer import AskResult, Coverage
 from pacer.ai.issues import Issue, IssueCode
 from pacer.ai.meeting_pipeline import ExtractionResult
 from pacer.ai.talk_pipeline import TalkResult
@@ -82,10 +83,11 @@ class MeetingCreate(_Body):
     title: Annotated[str, StaffMeeting.model_fields["title"]]
     held_on: date
     participant_ids: list[int] = Field(min_length=1, description="Staff members who took part")
-    transcript: str | None = Field(
-        default=None,
+    transcript: str = Field(
         min_length=20,
-        description="The meeting as text. Leave empty to upload a recording instead (POST /meetings/{id}/audio).",
+        max_length=100_000,
+        description="The meeting as text: typed notes, or a transcript made elsewhere. Stays on this server; "
+        "only an anonymized version reaches the model.",
     )
 
 
@@ -119,6 +121,57 @@ class IssueOut(BaseModel):
         return cls(code=issue.code, item=issue.item, detail=issue.detail, section=issue.section)
 
 
+class LibraryQuestion(_Body):
+    question: str = Field(min_length=5, max_length=1000, examples=["כמה חניכים יכול מדריך אחד ללוות כמו שצריך?"])
+
+
+class CitationOut(BaseModel):
+    passage: str = Field(description="The id the answer cites, e.g. P1")
+    source_id: int
+    source: str = Field(description="The work: title (author, year)")
+    evidence: str = Field(description="What kind of source it is, e.g. 'מחקר' or 'מקור ערכי-מסורתי'")
+    section: str | None = Field(description="Where in the work, e.g. 'הלכה ה'")
+    pages: str | None
+    similarity: float = Field(description="How close the passage is to the question (cosine, 0-1)")
+    cited: bool = Field(description="Whether the answer relied on it")
+
+
+class ClaimOut(BaseModel):
+    text: str
+    passages: list[str]
+
+
+class AskOut(BaseModel):
+    """An answer from the library only, with where each part of it comes from."""
+
+    question: str
+    answer: str
+    coverage: Coverage = Field(
+        description="direct: the sources answer the question; partial: the answer applies sources about a related "
+        "situation; none: the library has no source for it"
+    )
+    insufficient: bool = Field(description="True when the library has no source that answers the question")
+    claims: list[ClaimOut]
+    citations: list[CitationOut]
+    issues: list[IssueOut] = Field(description="What validation found in the model's answer. Check these")
+    prompt: str | None = Field(description="The exact prompt version, or null when no model was asked")
+    cost_usd: float | None
+
+    @classmethod
+    def of(cls, result: AskResult) -> "AskOut":
+        return cls(
+            question=result.question,
+            answer=result.answer,
+            coverage=result.coverage,
+            insufficient=result.insufficient,
+            claims=[ClaimOut(text=c.text, passages=c.passages) for c in result.claims],
+            citations=[CitationOut(**vars(c)) for c in result.citations],
+            issues=[IssueOut.of(i) for i in result.issues],
+            prompt=result.prompt_ref,
+            cost_usd=result.cost_usd,
+        )
+
+
 class ProcessResult(BaseModel):
     """What the meeting pipeline did: the proposals to review, and what validation changed."""
 
@@ -143,11 +196,6 @@ class ProcessResult(BaseModel):
             cost_usd=result.cost_usd,
             removed_sentences=result.removed_sentences,
         )
-
-
-class RecordingReceived(BaseModel):
-    meeting_id: int
-    size_bytes: int
 
 
 class SummarizeResult(BaseModel):

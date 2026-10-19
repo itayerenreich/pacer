@@ -18,10 +18,12 @@ from pacer.domain import (
     ApprovalKind,
     ApprovalRequest,
     ApprovalStatus,
+    Chunk,
     Cohort,
     Goal,
     GoalUpdate,
     Group,
+    KnowledgeSource,
     PersonalFile,
     PersonalTalk,
     ProposalStatus,
@@ -34,7 +36,7 @@ from pacer.domain import (
     Trainee,
     TraineeNote,
 )
-from pacer.repositories import Repos
+from pacer.repositories import Repos, ScoredChunk
 
 
 class _Store[M: BaseModel]:
@@ -214,22 +216,123 @@ class FakeUnitOfWork:
     @contextmanager
     def __call__(self) -> Iterator[Repos]:
         stores = [getattr(self.repos, name) for name in Repos.__dataclass_fields__]
-        snapshot = [copy.deepcopy(store.rows) for store in stores]
+        kept = ("rows", "embeddings", "_next")  # what each fake store holds
+        snapshot = [{a: copy.deepcopy(getattr(store, a)) for a in kept if hasattr(store, a)} for store in stores]
         self.open += 1
         self.opened += 1
         try:
             yield self.repos
         except BaseException:
-            for store, rows in zip(stores, snapshot, strict=True):
-                store.rows = rows
+            for store, saved in zip(stores, snapshot, strict=True):
+                for attribute, value in saved.items():
+                    setattr(store, attribute, value)
             raise
         finally:
             self.open -= 1
 
 
+class FakeKnowledgeSourceRepo(_Store[KnowledgeSource]):
+    def __init__(self, chunks: "FakeChunkRepo | None" = None) -> None:
+        super().__init__()
+        self._chunks = chunks
+
+    def add(self, item: KnowledgeSource) -> KnowledgeSource:
+        new_id = max(self.rows, default=0) + 1  # ids are never reused, even after a delete
+        saved = item.model_copy(update={"id": new_id})
+        self.rows[new_id] = saved.model_copy()
+        return saved
+
+    def list_all(self) -> list[KnowledgeSource]:
+        return [self.rows[i].model_copy() for i in sorted(self.rows)]
+
+    def delete(self, source_id: int) -> None:
+        self.rows.pop(source_id, None)
+        if self._chunks is not None:  # ON DELETE CASCADE
+            for chunk in [c for c in self._chunks.rows.values() if c.source_id == source_id]:
+                self._chunks.drop(chunk.key)
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    if len(a) != len(b):
+        raise ValueError(f"different vector dimensions: {len(a)} and {len(b)}")  # pgvector refuses too
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
+    norm = (sum(x * x for x in a) ** 0.5) * (sum(y * y for y in b) ** 0.5)
+    return dot / norm if norm else 0.0
+
+
+class FakeChunkRepo:
+    """Chunks and their embeddings in memory. Search is the same math as pgvector, in Python."""
+
+    def __init__(self) -> None:
+        self.rows: dict[int, Chunk] = {}
+        self.embeddings: dict[tuple[int, str], list[float]] = {}
+        self.sources: FakeKnowledgeSourceRepo | None = None  # set by empty_repos, for search
+        self._next = 1
+
+    def add_many(self, chunks: list[Chunk]) -> list[Chunk]:
+        saved = []
+        for chunk in chunks:
+            if any(
+                c.source_id == chunk.source_id and c.chunking == chunk.chunking and c.ordinal == chunk.ordinal
+                for c in self.rows.values()
+            ):
+                raise ValueError("uq_chunks_position: this source already has a chunk at this position")
+            stored = chunk.model_copy(update={"id": self._next})
+            self.rows[self._next] = stored
+            self._next += 1
+            saved.append(stored.model_copy())
+        return saved
+
+    def drop(self, chunk_id: int) -> None:
+        self.rows.pop(chunk_id, None)
+        for key in [key for key in self.embeddings if key[0] == chunk_id]:
+            del self.embeddings[key]
+
+    def get_many(self, chunk_ids: list[int]) -> list[Chunk]:
+        return [self.rows[i].model_copy() for i in chunk_ids if i in self.rows]
+
+    def list_by_source(self, source_id: int, chunking: str) -> list[Chunk]:
+        found = [c for c in self.rows.values() if c.source_id == source_id and c.chunking == chunking]
+        return [c.model_copy() for c in sorted(found, key=lambda c: c.ordinal)]
+
+    def delete_by_source(self, source_id: int, chunking: str) -> int:
+        doomed = [c.key for c in self.rows.values() if c.source_id == source_id and c.chunking == chunking]
+        for chunk_id in doomed:
+            self.drop(chunk_id)
+        return len(doomed)
+
+    def save_embeddings(self, model: str, vectors: dict[int, list[float]]) -> None:
+        for chunk_id, vector in vectors.items():
+            if chunk_id not in self.rows:
+                raise LookupError(f"chunk {chunk_id} does not exist")  # a foreign key in the database
+            self.embeddings[(chunk_id, model)] = list(vector)
+
+    def missing_embeddings(self, model: str, chunking: str) -> list[Chunk]:
+        found = [c for c in self.rows.values() if c.chunking == chunking and (c.key, model) not in self.embeddings]
+        return [c.model_copy() for c in sorted(found, key=lambda c: (c.source_id, c.ordinal))]
+
+    def search(
+        self, model: str, chunking: str, query: list[float], *, k: int, cloud_safe_only: bool = False
+    ) -> list[ScoredChunk]:
+        assert self.sources is not None
+        hits = []
+        for (chunk_id, used_model), vector in self.embeddings.items():
+            chunk = self.rows[chunk_id]
+            source = self.sources.get(chunk.source_id)
+            if used_model != model or chunk.chunking != chunking or source is None:
+                continue
+            if cloud_safe_only and source.local_only:
+                continue
+            hits.append(ScoredChunk(chunk=chunk.model_copy(), source=source, similarity=_cosine(vector, query)))
+        return sorted(hits, key=lambda h: (-h.similarity, h.chunk.key))[:k]
+
+
 def empty_repos() -> Repos:
     """A fresh, empty fake for every repository."""
     talk_proposals = FakeTalkProposalRepo()
+    chunks = FakeChunkRepo()
+    sources = FakeKnowledgeSourceRepo(chunks)
+    chunks.sources = sources
     return Repos(
         staff=FakeStaffRepo(),
         cohorts=FakeCohortRepo(),
@@ -245,6 +348,8 @@ def empty_repos() -> Repos:
         talks=FakeTalkRepo(talk_proposals),
         talk_proposals=talk_proposals,
         notes=FakeTraineeNoteRepo(talk_proposals),
+        sources=sources,
+        chunks=chunks,
     )
 
 
@@ -270,6 +375,9 @@ class World:
     talks: FakeTalkRepo = field(default_factory=FakeTalkRepo)
     talk_proposals: FakeTalkProposalRepo = field(default_factory=FakeTalkProposalRepo)
     notes: FakeTraineeNoteRepo = field(default_factory=FakeTraineeNoteRepo)
+    chunks: FakeChunkRepo = field(default_factory=FakeChunkRepo)
+    sources: FakeKnowledgeSourceRepo = field(default_factory=FakeKnowledgeSourceRepo)
+
     @property
     def repos(self) -> Repos:
         return Repos(**{name: getattr(self, name) for name in Repos.__dataclass_fields__})
@@ -277,6 +385,8 @@ class World:
     def __post_init__(self) -> None:
         self.notes = FakeTraineeNoteRepo(self.talk_proposals)
         self.talks = FakeTalkRepo(self.talk_proposals)
+        self.sources = FakeKnowledgeSourceRepo(self.chunks)
+        self.chunks.sources = self.sources
         self.uow = FakeUnitOfWork(self.repos)
         self.manager = self.staff.add(StaffMember(full_name="Ronit Manager", role=StaffRole.MANAGER))
         self.noa = self.staff.add(StaffMember(full_name="Noa Levi", role=StaffRole.COUNSELOR))

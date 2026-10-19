@@ -163,3 +163,76 @@ def test_claude_summarizes_the_sample_talk_safely():
     assert "כאבי ראש" not in raw[raw.find('"notes"') :]  # and Claude did not even propose them
     assert HEBREW.search(result.talk.summary)
     assert result.cost_usd is not None and result.cost_usd < 0.01
+
+
+# --- embeddings, with the real models in Ollama (stage 4) -------------------------------------------
+
+
+@pytest.mark.parametrize("name", ["bge-m3", "qwen3-embedding-0.6b"])
+def test_a_real_embedding_model_works_on_hebrew(name):
+    """Needs `ollama pull bge-m3` / `ollama pull qwen3-embedding:0.6b`. Checks the MECHANICS: real
+    vectors of the declared size, the same text twice gives the same vector, and a reworded
+    sentence is closer than an unrelated one.
+
+    Which model understands Hebrew counselors' questions BETTER is not a test with one example: on
+    2026-10-18 bge-m3 put "חניך שמתכונן לגיבוש" (shares the word חניך) above "מתבודד מהחבר'ה"
+    (shares only the meaning), and qwen3 did not. One example decides nothing; it is a question
+    for the evaluation set (python -m pacer.library compare), where many questions decide."""
+    from pacer.ai.embeddings import EMBEDDING_MODELS, ollama_embedder
+
+    embedder = ollama_embedder(name)
+    same, reworded, unrelated = embedder.embed_documents(
+        ["חניך שיושב לבד בארוחות ולא מדבר עם הקבוצה",
+         "חניך שמתבודד ולא משתלב עם החבר'ה בקבוצה",
+         "לוח הזמנים של ההסעה לטיול השנתי"]
+    )
+
+    def cosine(a, b):
+        dot = sum(x * y for x, y in zip(a, b, strict=True))
+        return dot / ((sum(x * x for x in a) ** 0.5) * (sum(y * y for y in b) ** 0.5))
+
+    assert len(same) == EMBEDDING_MODELS[name].dimensions
+    assert cosine(same, embedder.embed_documents(["חניך שיושב לבד בארוחות ולא מדבר עם הקבוצה"])[0]) > 0.999
+    assert cosine(same, reworded) > cosine(same, unrelated)
+
+
+# --- answering from the library, with bge-m3 and Claude (stage 4, task 6) ----------------------------
+
+
+def test_claude_answers_from_the_library_and_says_so_when_it_cannot():
+    """Needs ANTHROPIC_API_KEY and `ollama pull bge-m3`. Two Rambam passages, embedded for real."""
+    from fakes import FakeUnitOfWork, empty_repos
+
+    from pacer.ai.answer import LibraryAnswerer
+    from pacer.ai.embeddings import ollama_embedder
+    from pacer.ai.library import index_library
+    from pacer.ai.routing import get_router
+    from pacer.domain import Chunk, EvidenceLevel, KnowledgeSource, SourceKind, SourceLicense
+
+    repos = empty_repos()
+    uow = FakeUnitOfWork(repos)
+    with uow() as r:
+        source = r.sources.add(
+            KnowledgeSource(title="משנה תורה, הלכות תלמוד תורה פרק ב'", author='רמב"ם', kind=SourceKind.CLASSIC,
+                            evidence_level=EvidenceLevel.TRADITION, license=SourceLicense.PUBLIC_DOMAIN)
+        )
+        r.chunks.add_many([
+            Chunk(source_id=source.key, chunking="fixed-200-40", ordinal=0, section="הלכה ה",
+                  text="עשרים וחמשה תינוקות למלמד אחד. היו יתר על עשרים וחמשה עד ארבעים, מושיבין עמו אחר לסייעו בלימודן."),
+            Chunk(source_id=source.key, chunking="fixed-200-40", ordinal=1, section="הלכה ב",
+                  text="מכניסין את התינוקות להתלמד כבן שש כבן שבע, לפי כח הבן ובנין גופו."),
+        ])
+    embedder = ollama_embedder("bge-m3")
+    index_library(uow, embedder, "fixed-200-40")
+    answerer = LibraryAnswerer(uow, get_router(), embedder, "fixed-200-40")
+
+    result = answerer.ask("כמה חניכים יכול מדריך אחד ללוות, ומתי צריך עוד איש צוות?")
+    # The passages speak of teachers of children, so "partial" (an application) is as right as "direct"
+    assert not result.insufficient and result.issues == [], (result.coverage, result.issues)
+    assert any(c.passage == "P1" and c.cited and c.section == "הלכה ה" for c in result.citations) or any(
+        c.cited and c.section == "הלכה ה" for c in result.citations
+    )
+    assert HEBREW.search(result.answer)
+
+    off_topic = answerer.ask("איך ממלאים טופס בקשה לדחיית שירות בצה\"ל?")
+    assert off_topic.insufficient  # no source: either nothing passed the floor, or Claude said so

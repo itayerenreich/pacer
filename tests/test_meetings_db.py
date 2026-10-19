@@ -63,6 +63,7 @@ def test_open_proposals_are_counted_in_the_database(engine, staff):
                 held_on=date(2026, 10, 12),
                 created_by_id=staff["manager"],
                 participant_ids=[staff["manager"]],
+                transcript="רונית: נתחיל את הישיבה השבועית.",
             )
         )
         proposals = ProposedTaskRepository(session)

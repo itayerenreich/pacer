@@ -408,3 +408,29 @@ def test_preferring_someone_does_not_affect_names_that_are_not_theirs(anonymizer
     shahar = Person(T, 3, "שחר", "ששון")
     safe = anonymizer.anonymize("כהן, שחר", prefer=[shahar])
     assert safe.text == "[NAME_1], [TRAINEE_3]"  # כהן fits two others: still ambiguous
+
+
+# --- words a person marked as words (the evaluation's "words stay words" run) -------------------------
+
+
+def test_a_span_marked_as_a_word_is_left_as_written_and_everything_else_is_masked(anonymizer):
+    """שחר ששון is a trainee; the second "שחר" is dawn, and a person said so."""
+    text = "שחר ששון קם עם שחר ולמד עם נועה."
+    start = text.rindex("שחר")
+    marked = anonymizer.anonymize(text, words=[(start, start + 3)])
+    assert marked.text == "[TRAINEE_3] קם עם שחר ולמד עם [STAFF_2]."  # only the marked span is spared
+    plain = anonymizer.anonymize(text)
+    assert plain.text == "[TRAINEE_3] קם עם [TRAINEE_3] ולמד עם [STAFF_2]."  # without the mark: him
+
+
+def test_marked_spans_must_be_inside_the_text_and_not_overlap(anonymizer):
+    with pytest.raises(ValueError):
+        anonymizer.anonymize("קם עם שחר", words=[(6, 9), (7, 8)])
+    with pytest.raises(ValueError):
+        anonymizer.anonymize("קם עם שחר", words=[(6, 99)])
+    with pytest.raises(ValueError, match="set words aside"):
+        anonymizer.anonymize("קם עם שחר \ue0000\ue001", words=[(6, 9)])
+
+
+def test_slot_characters_in_a_text_without_marks_are_harmless(anonymizer):
+    assert anonymizer.anonymize("א \ue0007\ue001 ב").text == "א \ue0007\ue001 ב"

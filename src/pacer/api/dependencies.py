@@ -21,19 +21,19 @@ Even the actor is read in its own short transaction (DetachedActor), closed befo
 """
 
 from collections.abc import Iterator
-from functools import cache
 from typing import Annotated
 
 from fastapi import Depends, Header
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
+from pacer.ai.answer import LibraryAnswerer
+from pacer.ai.embeddings import DEFAULT_EMBEDDING_MODEL, Embedder, ollama_embedder
 from pacer.ai.meeting_pipeline import MeetingPipeline
 from pacer.ai.routing import Router, get_router
 from pacer.ai.talk_pipeline import TalkPipeline
-from pacer.ai.transcription import RecordingStore, Transcriber, WhisperTranscriber
-from pacer.config import get_ai_settings
 from pacer.domain import StaffMember
+from pacer.library.chunking import DEFAULT_CHUNKING
 from pacer.repositories import (
     ApprovalRequestRepository,
     GoalRepository,
@@ -270,29 +270,11 @@ def get_ai_router() -> Router:
     return get_router()
 
 
-@cache
-def _whisper() -> Transcriber | None:
-    """One transcriber per process: it holds the loaded model. None when faster-whisper is not installed."""
-    if not WhisperTranscriber.available():
-        return None
-    return WhisperTranscriber(get_ai_settings().whisper_model)
-
-
-def get_transcriber() -> Transcriber | None:
-    return _whisper()
-
-
-def get_recordings() -> RecordingStore:
-    return RecordingStore(get_ai_settings().recordings_dir)
-
-
 def get_meeting_pipeline(
     uow: UnitOfWorkDep,
     router: Annotated[Router, Depends(get_ai_router)],
-    transcriber: Annotated[Transcriber | None, Depends(get_transcriber)],
-    recordings: Annotated[RecordingStore, Depends(get_recordings)],
 ) -> MeetingPipeline:
-    return MeetingPipeline(uow, router, transcriber=transcriber, recordings=recordings)
+    return MeetingPipeline(uow, router)
 
 
 MeetingPipelineDep = Annotated[MeetingPipeline, Depends(get_meeting_pipeline)]
@@ -305,3 +287,19 @@ def get_talk_pipeline(
 
 
 TalkPipelineDep = Annotated[TalkPipeline, Depends(get_talk_pipeline)]
+
+
+def get_embedder() -> Embedder:
+    """The embedding model of the library (chosen by measurement), served by Ollama on this computer."""
+    return ollama_embedder(DEFAULT_EMBEDDING_MODEL)
+
+
+def get_library_answerer(
+    uow: UnitOfWorkDep,
+    router: Annotated[Router, Depends(get_ai_router)],
+    embedder: Annotated[Embedder, Depends(get_embedder)],
+) -> LibraryAnswerer:
+    return LibraryAnswerer(uow, router, embedder, DEFAULT_CHUNKING)
+
+
+LibraryAnswererDep = Annotated[LibraryAnswerer, Depends(get_library_answerer)]

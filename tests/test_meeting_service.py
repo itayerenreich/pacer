@@ -64,16 +64,15 @@ def test_a_text_meeting_starts_transcribed(world, service):
     assert new_meeting(world, service).status is MeetingStatus.TRANSCRIBED
 
 
-def test_an_audio_meeting_starts_uploaded(world, service):
-    meeting = service.create_meeting(
-        world.manager, title="ישיבה", held_on=HELD_ON, participant_ids=[world.noa.id]
-    )
-    assert meeting.status is MeetingStatus.UPLOADED
+def test_a_meeting_starts_transcribed(world, service):
+    assert new_meeting(world, service).status is MeetingStatus.TRANSCRIBED
 
 
 def test_only_the_manager_records_meetings_and_reads_transcripts(world, service):
     with pytest.raises(PermissionDeniedError):
-        service.create_meeting(world.noa, title="ישיבה", held_on=HELD_ON, participant_ids=[world.noa.id])
+        service.create_meeting(
+            world.noa, title="ישיבה", held_on=HELD_ON, participant_ids=[world.noa.id], transcript=TRANSCRIPT
+        )
     meeting = new_meeting(world, service)
     with pytest.raises(PermissionDeniedError):
         service.get_meeting(world.noa, meeting.id)
@@ -81,7 +80,9 @@ def test_only_the_manager_records_meetings_and_reads_transcripts(world, service)
 
 def test_participants_must_exist(world, service):
     with pytest.raises(NotFoundError, match="Staff member 999"):
-        service.create_meeting(world.manager, title="ישיבה", held_on=HELD_ON, participant_ids=[999])
+        service.create_meeting(
+            world.manager, title="ישיבה", held_on=HELD_ON, participant_ids=[999], transcript=TRANSCRIPT
+        )
 
 
 # --- proposals in -------------------------------------------------------------------------------

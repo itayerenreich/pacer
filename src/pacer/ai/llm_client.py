@@ -107,7 +107,8 @@ _ERROR_MAP: list[tuple[type[Exception], type[LLMError]]] = [
 ]
 
 
-def _translate(error: Exception) -> LLMError:
+def translate_error(error: Exception) -> LLMError:
+    """A provider exception as one of OUR errors (LLMError and subclasses)."""
     for source, target in _ERROR_MAP:
         if isinstance(error, source):
             return target(str(error))
@@ -136,16 +137,22 @@ class LiteLLMClient:
         temperature: float | None = None,
         timeout_s: float = 60,
         retries: int = 2,
+        native_schema: bool | None = None,
+        options: dict[str, Any] | None = None,
     ) -> None:
         self.model = model
         self.runs_locally = runs_locally
         # Known once, from litellm's bundled model table (no network): Claude yes, llama3.2 no.
-        self.native_schema = bool(litellm.supports_response_schema(model=model))
+        # native_schema=False overrides it: the schema then goes in the message, and Pydantic validates.
+        self.native_schema = (
+            bool(litellm.supports_response_schema(model=model)) if native_schema is None else native_schema
+        )
         self._api_key = api_key
         self._api_base = api_base
         self._temperature = temperature
         self._timeout_s = timeout_s
         self._retries = retries
+        self._options = dict(options or {})  # provider-specific settings, e.g. Ollama's num_ctx
 
     def complete(
         self,
@@ -162,7 +169,7 @@ class LiteLLMClient:
         try:
             raw = litellm.completion(**self._request(prompt, user_message, max_tokens, response_schema))
         except Exception as error:  # every provider failure leaves as one of OUR errors
-            translated = _translate(error)
+            translated = translate_error(error)
             log.warning(
                 "LLM call failed: prompt=%s model=%s error=%s",
                 prompt.ref,
@@ -199,6 +206,7 @@ class LiteLLMClient:
         }
         if self._temperature is not None:
             request["temperature"] = self._temperature
+        request.update(self._options)
         if response_schema is not None and self.native_schema:
             # The provider constrains the answer to this shape. For Anthropic, litellm also removes
             # the keywords Claude rejects (minLength, maximum...) and keeps them as descriptions.

@@ -7,7 +7,6 @@ and that no personal data reached a model that is not local.
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 from pacer.ai import LLMResponse, Prompt
@@ -78,18 +77,35 @@ def fake_router(cloud: FakeLLMClient, local: FakeLLMClient | None = None) -> Rou
     )
 
 
-@dataclass
-class FakeTranscriber:
-    """Speech to text without a model: returns `text`, or raises `error`. Records each file it got."""
+class FakeEmbedder:
+    """Embeddings without a model: each word adds 1 to one of 1024 positions (by a fixed hash).
+    Texts that share words get close vectors, texts that share none are far apart. Deterministic,
+    instant, and enough to test indexing and search. Records what it embedded."""
 
-    text: str = ""
-    error: Exception | None = None
-    runs_locally: bool = True
-    calls: list[Path] = field(default_factory=list)
+    def __init__(self, name: str = "fake-embed", *, runs_locally: bool = True, dimensions: int = 1024) -> None:
+        from pacer.ai.embeddings import EmbeddingSpec
 
-    def transcribe(self, audio: Path) -> str:
-        assert audio.exists(), "the recording must exist while it is transcribed"
-        self.calls.append(audio)
-        if self.error is not None:
-            raise self.error
-        return self.text
+        self.spec = EmbeddingSpec(name=name, litellm_model=f"fake/{name}", dimensions=dimensions)
+        self.runs_locally = runs_locally
+        self.documents: list[str] = []
+        self.queries: list[str] = []
+        self.calls = 0
+
+    def _vector(self, text: str) -> list[float]:
+        import zlib
+
+        vector = [0.0] * self.spec.dimensions
+        for word in text.split():
+            vector[zlib.crc32(word.strip(".,:;!?\"'״׳").encode()) % self.spec.dimensions] += 1.0
+        if not any(vector):
+            vector[0] = 1e-6  # never a zero vector
+        return vector
+
+    def embed_documents(self, texts) -> list[list[float]]:
+        self.calls += 1
+        self.documents += list(texts)
+        return [self._vector(t) for t in texts]
+
+    def embed_query(self, text: str) -> list[float]:
+        self.queries.append(text)
+        return self._vector(text)

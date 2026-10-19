@@ -29,7 +29,7 @@ from testcontainers.community.postgres import PostgresContainer
 
 from pacer.repositories.tables import Base
 
-POSTGRES_IMAGE = "postgres:17"  # same version as compose.yaml
+POSTGRES_IMAGE = "pgvector/pgvector:pg17"  # same image as compose.yaml
 ALEMBIC_INI = Path(__file__).resolve().parents[1] / "alembic.ini"
 
 

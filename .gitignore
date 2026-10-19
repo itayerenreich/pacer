@@ -14,5 +14,5 @@ wheels/
 .env
 
 
-# Local data: meeting recordings waiting for transcription (personal data, never in Git)
+# Local data: library files, reports, exports (personal or copyrighted, never in Git)
 data/

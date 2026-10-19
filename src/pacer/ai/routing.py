@@ -45,6 +45,9 @@ class AITask(StrEnum):
     EXTRACT_MEETING = "extract_meeting"  # task 6: summary + proposed tasks from a staff meeting
     SUMMARIZE_TALK = "summarize_talk"  # task 7: personal talk summary + proposed notes
     SYNTHETIC_DATA = "synthetic_data"  # stage 4: invented transcripts and cases for evaluation
+    ANSWER_FROM_LIBRARY = "answer_from_library"  # stage 4: a staff question, answered from the library
+    ANSWER_WITHOUT_LIBRARY = "answer_without_library"  # stage 4 evaluation: the same question, no passages
+    JUDGE = "judge"  # stage 4 evaluation: grades an answer or a talk summary against the answer key
 
 
 @dataclass(frozen=True)
@@ -69,6 +72,9 @@ MODELS: Mapping[str, ModelSpec] = MappingProxyType(
             runs_locally=False, make_client=lambda: claude_client("claude-sonnet-5-5")
         ),
         "local-small": ModelSpec(runs_locally=True, make_client=lambda: ollama_client("llama3.2")),
+        # Stage 4, task 9: the open model compared with Claude. Chosen for Itay's laptop (16 GB, no GPU):
+        # about 3 GB, multilingual, no "thinking" mode to slow every answer. ollama pull gemma3:4b
+        "gemma3-4b": ModelSpec(runs_locally=True, make_client=lambda: ollama_client("gemma3:4b")),
     }
 )
 
@@ -79,6 +85,12 @@ ROUTES: Mapping[AITask, Route] = MappingProxyType(
         AITask.EXTRACT_MEETING: Route("claude-haiku", Sensitivity.ANONYMIZED, max_tokens=4000),
         AITask.SUMMARIZE_TALK: Route("claude-haiku", Sensitivity.ANONYMIZED, max_tokens=4000),
         AITask.SYNTHETIC_DATA: Route("claude-sonnet", Sensitivity.PUBLIC, max_tokens=8000),
+        # The library is not personal, but a question may name a trainee: it is anonymized first.
+        AITask.ANSWER_FROM_LIBRARY: Route("claude-haiku", Sensitivity.ANONYMIZED, max_tokens=3000),
+        # The evaluation. The baseline answers like ANSWER_FROM_LIBRARY, with the same model, minus the
+        # passages. The judge is a stronger model than the one it grades (decision 2026-10-19).
+        AITask.ANSWER_WITHOUT_LIBRARY: Route("claude-haiku", Sensitivity.ANONYMIZED, max_tokens=2000),
+        AITask.JUDGE: Route("claude-sonnet", Sensitivity.ANONYMIZED, max_tokens=3000),
     }
 )
 

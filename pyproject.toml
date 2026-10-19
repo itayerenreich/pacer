@@ -11,21 +11,20 @@ dependencies = [
     "alembic>=1.20.0",
     "fastapi>=0.143.1",
     "litellm==1.104.2",
+    "pgvector==0.5.0",
+    "pypdf==6.19.0",
+    "python-docx==1.2.0",
     "psycopg[binary]>=3.3.6",
     "pydantic>=2.13.5",
     "pydantic-settings>=2.15.0",
     "python-multipart>=0.0.32",
     "sqlalchemy>=2.1.3",
     "uvicorn[standard]>=0.54.0",
+    "tenacity==9.1.4",
 ]
 
 [project.scripts]
 pacer = "pacer:main"
-
-[project.optional-dependencies]
-audio = [
-    "faster-whisper==1.2.1",
-]
 
 [build-system]
 requires = ["uv_build>=0.12.12,<0.13.0"]
@@ -48,11 +47,6 @@ filterwarnings = [
     # litellm's own type definitions trigger this pydantic notice; it is not about our code
     "ignore:Item .* is using the `ReadOnly` qualifier:UserWarning",
 ]
-
-[tool.uv]
-# Supply-chain cooldown for the optional audio stack: never resolve a release younger than about
-# two weeks (a compromised release is usually caught and pulled within days; see the LiteLLM pin).
-exclude-newer-package = { ctranslate2 = "2026-09-30T00:00:00Z", onnxruntime = "2026-09-30T00:00:00Z", numpy = "2026-09-30T00:00:00Z", av = "2026-09-30T00:00:00Z", faster-whisper = "2026-09-30T00:00:00Z" }
 
 [tool.ruff]
 line-length = 120
@@ -77,5 +71,5 @@ warn_redundant_casts = true
 check_untyped_defs = true
 
 [[tool.mypy.overrides]]
-module = ["litellm.*", "faster_whisper.*", "testcontainers.*"]
+module = ["litellm.*", "testcontainers.*"]
 ignore_missing_imports = true

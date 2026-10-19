@@ -1,0 +1,444 @@
+{
+  "name": "talks",
+  "version": 1,
+  "about": "Invented personal talks with trainees of the demo academy (python -m pacer.demo, seed 2026). Written by Claude on 2026-10-19 to measure the talk pipeline, and the open question from stage 3: what anonymization does to names that are also everyday words. Every such word in the notes is marked with what it means here. Waits for Itay's review. Frozen once results are reported: changes go into v2. Fixed before any result (2026-10-19): T01 had a trainee who left the academy; T03 expected progress on a dropped goal.",
+  "cases": [
+    {
+      "id": "T01",
+      "tests": "a name that is also a word (אגם, a lake) in the trainee's own talk: is the word tied to her?",
+      "trainee": "אגם לנדאו",
+      "counselor": "איתי ביטון",
+      "held_on": "2026-10-14",
+      "notes": "שיחה אישית עם אגם.\nהשבוע אגם דיברה בשיחת הקבוצה פעמיים, ופעם אחת אפילו הציעה רעיון לפעילות. עד עכשיו היא כמעט לא דיברה בשיחות.\nמה שעזר: ביקשתי ממנה מראש להכין נקודה אחת לשיחה, והיא הגיעה מוכנה.\nהיא כבר מתאמנת לקראת יום המא\"ה שלוש פעמים בשבוע, ובמבחן הכושר האחרון שיפרה את התוצאה.\nבטיול לאגם בשבת היא התנדבה לסחוב את הציוד של הקבוצה, וזה הפתיע אותי לטובה.\nמה שפחות עבד: כשניסיתי לדבר איתה על הוויכוח עם שקד היא התחמקה. סיכמנו שנחזור לזה בשיחה הבאה.",
+      "progress": [
+        {
+          "goal": "להשתתף באופן פעיל בשיחות הקבוצה",
+          "low": 20,
+          "high": 45,
+          "required": true
+        },
+        {
+          "goal": "לשפר כושר לקראת יום המא״ה",
+          "low": 55,
+          "high": 75,
+          "required": true
+        }
+      ],
+      "expected_notes": [
+        {
+          "kind": "worked",
+          "gist": "להכין מראש נקודה אחת לשיחת הקבוצה עזר לה להשתתף"
+        },
+        {
+          "kind": "follow_up",
+          "gist": "לחזור לשיחה על הוויכוח עם שקד"
+        }
+      ],
+      "mentions": [
+        {
+          "word": "אגם",
+          "occurrence": 1,
+          "means": "trainee:אגם לנדאו"
+        },
+        {
+          "word": "אגם",
+          "occurrence": 2,
+          "means": "trainee:אגם לנדאו"
+        },
+        {
+          "word": "כבר",
+          "occurrence": 1,
+          "means": "word"
+        },
+        {
+          "word": "לאגם",
+          "occurrence": 1,
+          "means": "word"
+        },
+        {
+          "word": "שקד",
+          "occurrence": 1,
+          "means": "trainee:שקד ששון"
+        }
+      ]
+    },
+    {
+      "id": "T02",
+      "tests": "בן is a name and an everyday word (son, 'aged'): the trainee is בן himself",
+      "trainee": "בן שפירא",
+      "counselor": "עומר כהן",
+      "held_on": "2026-10-14",
+      "notes": "שיחה עם בן.\nבן סיפר שהוא הבן הבכור במשפחה ושהוא מרגיש אחריות כלפי האחים הקטנים. כשאחיו הצעיר, בן 15, ביקש עזרה בשיעורים, הוא עזר לו כל ערב בחופשה.\nבשיחות הקבוצה השבוע הוא דיבר פעמיים, ופעם אחת אפילו פתח את הדיון. זה צעד גדול בשבילו.\nבמרכז הקהילתי הוא לא היה השבוע כי התורנות התנגשה, והוא אמר שבשבוע הבא ישלים.\nמה שעבד: כשנתתי לו תפקיד מוגדר בדיון, לסכם בסוף, הוא השתתף יותר.",
+      "progress": [
+        {
+          "goal": "להשתתף באופן פעיל בשיחות הקבוצה",
+          "low": 40,
+          "high": 65,
+          "required": true
+        },
+        {
+          "goal": "להתנדב שעתיים בשבוע במרכז הקהילתי",
+          "low": 35,
+          "high": 35,
+          "required": false
+        }
+      ],
+      "expected_notes": [
+        {
+          "kind": "worked",
+          "gist": "תפקיד מוגדר בדיון (לסכם בסוף) עזר לו להשתתף"
+        },
+        {
+          "kind": "follow_up",
+          "gist": "להשלים את ההתנדבות במרכז הקהילתי בשבוע הבא"
+        }
+      ],
+      "mentions": [
+        {
+          "word": "בן",
+          "occurrence": 1,
+          "means": "trainee:בן שפירא"
+        },
+        {
+          "word": "בן",
+          "occurrence": 2,
+          "means": "trainee:בן שפירא"
+        },
+        {
+          "word": "הבן",
+          "occurrence": 1,
+          "means": "word"
+        },
+        {
+          "word": "בן",
+          "occurrence": 3,
+          "means": "word"
+        }
+      ]
+    },
+    {
+      "id": "T03",
+      "tests": "two trainees named רעות, and רעות is also a word (friendship): she and the word get the same neutral token",
+      "trainee": "רעות קליין",
+      "counselor": "נועה לוי",
+      "held_on": "2026-10-15",
+      "notes": "שיחה אישית עם רעות.\nרעות אמרה שהרעות בקבוצה השתפרה מאוד מאז הטיול, ושיש רעות אמיתית בין הבנות. החודש היא ישבה לשיחה אישית עם ארבעה חברים מהקבוצה שלא הכירה, ורוצה להמשיך עד שתכיר את כולם.\nבעליות מתח היא הגיעה ל-8, לעומת 4 בתחילת השנה.\nמה שעבד: לוח מעקב קטן על הדלת של החדר, שעליו היא מסמנת כל אימון.\nמה שפחות עבד: אימונים בערב. אחרי יום ארוך היא מוותרת. סיכמנו לנסות בצהריים.",
+      "progress": [
+        {
+          "goal": "להגיע ל-15 עליות מתח",
+          "low": 40,
+          "high": 60,
+          "required": true
+        }
+      ],
+      "expected_notes": [
+        {
+          "kind": "worked",
+          "gist": "לוח מעקב על הדלת שעליו היא מסמנת כל אימון"
+        },
+        {
+          "kind": "did_not_work",
+          "gist": "אימונים בערב, אחרי יום ארוך"
+        },
+        {
+          "kind": "follow_up",
+          "gist": "לנסות להתאמן בצהריים"
+        }
+      ],
+      "mentions": [
+        {
+          "word": "רעות",
+          "occurrence": 1,
+          "means": "trainee:רעות קליין"
+        },
+        {
+          "word": "רעות",
+          "occurrence": 2,
+          "means": "trainee:רעות קליין"
+        },
+        {
+          "word": "שהרעות",
+          "occurrence": 1,
+          "means": "word"
+        },
+        {
+          "word": "רעות",
+          "occurrence": 3,
+          "means": "word"
+        }
+      ]
+    },
+    {
+      "id": "T04",
+      "tests": "two trainees named שחר, and שחר is also dawn; כבר; a sibling with a prefix (ושקד)",
+      "trainee": "שחר ששון",
+      "counselor": "עומר כהן",
+      "held_on": "2026-10-15",
+      "notes": "שיחה עם שחר.\nשחר מצא לעצמו שעה קבועה ללימוד אישי: הוא קם עם שחר, לפני ההשכמה, ולומד חצי שעה. הוא עושה את זה כבר שלושה שבועות, כמעט כל יום.\nהוא ושקד עובדים יחד על תורנות המטבח השבוע, והוא אמר שזה הולך טוב.\nמה שעבד: לקבוע את הלימוד לפני שכולם קמים, כשאין הסחות דעת.\nסיכמנו שבשיחה הבאה נדבר על איך לשמור על זה גם בשבוע של ניווטים.",
+      "progress": [
+        {
+          "goal": "לסדר את סדר היום כך שיהיה זמן ללימוד אישי",
+          "low": 65,
+          "high": 90,
+          "required": true
+        }
+      ],
+      "expected_notes": [
+        {
+          "kind": "worked",
+          "gist": "ללמוד לפני ההשכמה, כשאין הסחות דעת"
+        },
+        {
+          "kind": "follow_up",
+          "gist": "איך לשמור על הלימוד גם בשבוע של ניווטים"
+        }
+      ],
+      "mentions": [
+        {
+          "word": "שחר",
+          "occurrence": 1,
+          "means": "trainee:שחר ששון"
+        },
+        {
+          "word": "שחר",
+          "occurrence": 2,
+          "means": "trainee:שחר ששון"
+        },
+        {
+          "word": "שחר",
+          "occurrence": 3,
+          "means": "word"
+        },
+        {
+          "word": "כבר",
+          "occurrence": 1,
+          "means": "word"
+        },
+        {
+          "word": "ושקד",
+          "occurrence": 1,
+          "means": "trainee:שקד ששון"
+        }
+      ]
+    },
+    {
+      "id": "T05",
+      "tests": "כבר (already) in the talk of יעל בר: the prefix rule must keep the word away from her",
+      "trainee": "יעל בר",
+      "counselor": "נועה לוי",
+      "held_on": "2026-10-16",
+      "notes": "שיחה עם יעל.\nיעל כבר סיימה את הספר של החודש ועברה לספר הבא. היא אמרה שהקריאה לפני השינה עוזרת לה להירגע.\nלקראת הגיבוש היא כבר עשתה את מסלול המכשולים פעמיים, ושיפרה את הזמן שלה בדקה.\nמה שפחות עבד: ריצה עם משקל. היא נתקעת באמצע. סיכמנו שתתחיל עם משקל קל יותר ותוסיף בהדרגה.",
+      "progress": [
+        {
+          "goal": "לקרוא ספר אחד בחודש",
+          "low": 75,
+          "high": 100,
+          "required": false
+        },
+        {
+          "goal": "להתכונן לגיבוש ולעבור את כל שלביו",
+          "low": 80,
+          "high": 95,
+          "required": true
+        }
+      ],
+      "expected_notes": [
+        {
+          "kind": "worked",
+          "gist": "קריאה לפני השינה עוזרת לה להירגע"
+        },
+        {
+          "kind": "did_not_work",
+          "gist": "ריצה עם משקל, היא נתקעת באמצע"
+        },
+        {
+          "kind": "follow_up",
+          "gist": "להתחיל עם משקל קל יותר ולהוסיף בהדרגה"
+        }
+      ],
+      "mentions": [
+        {
+          "word": "יעל",
+          "occurrence": 1,
+          "means": "trainee:יעל בר"
+        },
+        {
+          "word": "כבר",
+          "occurrence": 1,
+          "means": "word"
+        },
+        {
+          "word": "כבר",
+          "occurrence": 2,
+          "means": "word"
+        }
+      ]
+    },
+    {
+      "id": "T06",
+      "tests": "איתן as a name and an adjective (steady), two trainees named איתן, one named in full",
+      "trainee": "איתן אברהם",
+      "counselor": "שירה אברהם",
+      "held_on": "2026-10-16",
+      "notes": "שיחה אישית עם איתן.\nאיתן העביר השבוע את הפעילות הראשונה לבני הנוער בשכונה, ביחד עם איתן רוזן. הוא היה מתוח לפני, אבל נשאר איתן גם כשהילדים לא הקשיבו בהתחלה.\nבריצה הוא הגיע ל-3 ק\"מ ברצף.\nמה שעבד: חלוקת תפקידים ברורה עם השותף שלו לפעילות.\nמה שפחות עבד: הוא לא תכנן מה עושים אם הפעילות נגמרת מוקדם. סיכמנו שבפעם הבאה יכין פעילות גיבוי.",
+      "progress": [
+        {
+          "goal": "לבנות ולהעביר פעילות לבני נוער בשכונה",
+          "low": 70,
+          "high": 90,
+          "required": true
+        },
+        {
+          "goal": "לרוץ 5 ק״מ ברצף",
+          "low": 50,
+          "high": 65,
+          "required": true
+        }
+      ],
+      "expected_notes": [
+        {
+          "kind": "worked",
+          "gist": "חלוקת תפקידים ברורה עם השותף לפעילות"
+        },
+        {
+          "kind": "did_not_work",
+          "gist": "לא תכנן מה עושים אם הפעילות נגמרת מוקדם"
+        },
+        {
+          "kind": "follow_up",
+          "gist": "להכין פעילות גיבוי לפעם הבאה"
+        }
+      ],
+      "mentions": [
+        {
+          "word": "איתן",
+          "occurrence": 1,
+          "means": "trainee:איתן אברהם"
+        },
+        {
+          "word": "איתן",
+          "occurrence": 2,
+          "means": "trainee:איתן אברהם"
+        },
+        {
+          "word": "איתן",
+          "occurrence": 3,
+          "means": "trainee:איתן רוזן"
+        },
+        {
+          "word": "איתן",
+          "occurrence": 4,
+          "means": "word"
+        }
+      ]
+    },
+    {
+      "id": "T07",
+      "tests": "control: no name that is a word; and a health sentence that must never reach a proposal",
+      "trainee": "אדל אזולאי",
+      "counselor": "נועה לוי",
+      "held_on": "2026-10-16",
+      "notes": "שיחה עם אדל.\nאדל הובילה ביום חמישי את הערב החברתי לכל המחזור. היא תכננה את התוכנית, חילקה תפקידים, וההשתתפות הייתה כמעט מלאה. היא גאה בזה מאוד.\nהיא סיפרה שנקעה את הקרסול במשחק כדורגל והלכה לרופא, ולכן לא רצה השבוע.\nמה שעבד: היא ביקשה משוב מחברים אחרי הערב ורשמה מה לשפר.\nסיכמנו שהיא תעביר את מה שלמדה למי שיוביל את הערב הבא.",
+      "progress": [
+        {
+          "goal": "להוביל ערב חברתי לכל המחזור",
+          "low": 95,
+          "high": 100,
+          "required": true
+        }
+      ],
+      "expected_notes": [
+        {
+          "kind": "worked",
+          "gist": "ביקשה משוב מחברים אחרי הערב ורשמה מה לשפר"
+        },
+        {
+          "kind": "follow_up",
+          "gist": "להעביר את מה שלמדה למי שיוביל את הערב הבא"
+        }
+      ],
+      "forbidden": [
+        "קרסול",
+        "רופא",
+        "נקעה"
+      ],
+      "mentions": [
+        {
+          "word": "אדל",
+          "occurrence": 1,
+          "means": "trainee:אדל אזולאי"
+        },
+        {
+          "word": "אדל",
+          "occurrence": 2,
+          "means": "trainee:אדל אזולאי"
+        }
+      ]
+    },
+    {
+      "id": "T08",
+      "tests": "two trainees named זיו; a shared last name (וקנין); another trainee named in full and one by first name",
+      "trainee": "זיו וקנין",
+      "counselor": "איתי ביטון",
+      "held_on": "2026-10-17",
+      "notes": "שיחה עם זיו.\nזיו מתכונן לגיבוש ברצינות: הוא מתאמן חמש פעמים בשבוע ועבר את מבחן הכושר המקדים.\nביומן הוא כותב פעמיים בשבוע כבר חודש, בלי שאני מזכיר לו.\nהוא אמר שקשה לו להתחבר לחלק מהקבוצה. הוא מסתדר טוב עם רעות וקנין ועם איתמר, אבל עם השאר כמעט לא מדבר.\nמה שעבד: ההצעה לשבת כל ארוחת ערב ליד מישהו אחר.\nסיכמנו שבשבועיים הקרובים הוא יזמין שני חברים חדשים לשיחה.",
+      "progress": [
+        {
+          "goal": "להתכונן לגיבוש ולעבור את כל שלביו",
+          "low": 70,
+          "high": 85,
+          "required": true
+        },
+        {
+          "goal": "לנהל יומן אישי ולכתוב בו פעמיים בשבוע",
+          "low": 80,
+          "high": 100,
+          "required": true
+        },
+        {
+          "goal": "להכיר לעומק כל אחד מחברי הקבוצה",
+          "low": 25,
+          "high": 40,
+          "required": false
+        }
+      ],
+      "expected_notes": [
+        {
+          "kind": "worked",
+          "gist": "לשבת בכל ארוחת ערב ליד מישהו אחר"
+        },
+        {
+          "kind": "follow_up",
+          "gist": "להזמין שני חברים חדשים לשיחה בשבועיים הקרובים"
+        }
+      ],
+      "mentions": [
+        {
+          "word": "זיו",
+          "occurrence": 1,
+          "means": "trainee:זיו וקנין"
+        },
+        {
+          "word": "זיו",
+          "occurrence": 2,
+          "means": "trainee:זיו וקנין"
+        },
+        {
+          "word": "כבר",
+          "occurrence": 1,
+          "means": "word"
+        },
+        {
+          "word": "רעות",
+          "occurrence": 1,
+          "means": "trainee:רעות וקנין"
+        },
+        {
+          "word": "איתמר",
+          "occurrence": 1,
+          "means": "trainee:איתמר סויסה"
+        }
+      ]
+    }
+  ]
+}
