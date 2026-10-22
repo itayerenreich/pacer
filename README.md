@@ -2,6 +2,27 @@
 
 [![tests](https://github.com/itayerenreich/pacer/actions/workflows/tests.yml/badge.svg)](https://github.com/itayerenreich/pacer/actions/workflows/tests.yml)
 
+> **Work in progress.** Pacer is far from finished. The data layer, the API, the AI core and the
+> knowledge library (RAG) are built and tested; the counselor coach, the assistant and the staff
+> interface are still ahead (see [Status](#status)).
+
+**In short:** Pacer helps pre-military academies (מכינות קדם-צבאיות) run their year, educate by the
+texts and values they believe in, and give their counselors practical tools for the work with each trainee.
+
+- **Layered architecture, privacy enforced in code:** personal data never leaves the computer; names are
+  anonymized and health details removed before any cloud model, and the types make that step impossible to skip.
+- **RAG over the academy's own library:** answers come only from its texts, every claim cites its passage,
+  and when no passage fits, the system says so instead of guessing.
+- **AI proposes, people decide:** every summary, task or goal update waits for a staff member's approval.
+- **Measured, not assumed:** a versioned evaluation set, an LLM judge, a commercial vs open model comparison,
+  and tests with CI on every pull request.
+
+**About me:** I'm Itay Erenreich, a computer science and psychology student. In the two years before my
+degree I worked as a counselor and branch manager at a pre-military academy, and saw firsthand the need
+Pacer is built to answer.
+
+## What it does
+
 A backend for the staff of a pre-military academy (מכינה קדם-צבאית): counselors and a
 manager track trainees, the personal goals they set together, and progress over time.
 Sensitive actions, like opening a trainee's personal file or sending a trainee home,
