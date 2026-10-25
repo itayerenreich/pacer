@@ -14,6 +14,8 @@ May import from: domain, services, and repository interfaces (Protocols). Must n
     talk_pipeline.py     personal talk: anonymize -> summarize -> validate -> progress and note proposals
     issues.py            what content validation corrected, reported with the proposals
     sensitive.py         health and diagnoses: removed before sending, never kept in memory
+    safety.py            risk situations: found in code before any model, answered with a referral
+    risk_screen.py       the safety gate: the phrase list, then a model as a second net that only adds
     embeddings.py        text -> vector, with open models in Ollama (bge-m3, qwen3-embedding)
     library.py           index the library's chunks, and search them by meaning
     check.py       python -m pacer.ai.check: a harmless connection check

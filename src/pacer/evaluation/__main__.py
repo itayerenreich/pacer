@@ -5,6 +5,8 @@ uv run python -m pacer.evaluation masking --out data/masking-report.md  # anonym
 uv run python -m pacer.evaluation run --out data/eval-claude-haiku.md     # REAL models: costs about $1
 uv run python -m pacer.evaluation run --model claude-sonnet --only talks --limit 2 --out data/try.md
 uv run python -m pacer.evaluation compare data/eval-*.json --out data/models.md  # runs, side by side
+uv run python -m pacer.evaluation safety                                   # the phrase list alone: free
+uv run python -m pacer.evaluation safety --send --out data/safety.md       # with the model screen: about $0.05
 
 check and masking need no model. run needs ANTHROPIC_API_KEY, and Ollama for the embeddings (bge-m3).
 All read the academy from the database in .env (the demo academy: python -m pacer.demo). run writes the
@@ -22,6 +24,7 @@ from pacer.ai.anonymization import Anonymizer, load_roster
 from pacer.ai.answer import PROMPT_VERSION as ANSWER_PROMPT_VERSION
 from pacer.ai.answer import LibraryAnswerer
 from pacer.ai.embeddings import DEFAULT_EMBEDDING_MODEL, ollama_embedder
+from pacer.ai.risk_screen import SafetyGate
 from pacer.ai.routing import MODELS, AITask
 from pacer.ai.structured import StructuredOutputError
 from pacer.ai.talk_pipeline import PROMPT_VERSION as TALK_PROMPT_VERSION
@@ -43,10 +46,12 @@ from .run import (
     run_talk_case,
     talk_summary,
 )
+from .safety_set import evaluate, evaluate_gate, load_safety_set, render_gate
 from .talk_set import CaseError, load_talk_set, resolve
 
 LIBRARY_SET = Path("evals/library-v1.json")
 TALK_SET = Path("evals/talks-v1.json")
+SAFETY_SETS = {"heldout": Path("evals/safety-heldout-v1.json"), "main": Path("evals/safety-v1.json")}
 MANIFESTS = [Path("library/classics.json")]
 
 
@@ -256,6 +261,27 @@ def compare_runs(files: list[Path]) -> str:
     return "\n".join([*lines, "", *notes])
 
 
+def safety(which: str, *, send: bool) -> str:
+    """The safety gate on a set. Without --send, the phrase list alone (no model, no cost, no database)."""
+    eval_set = load_safety_set(SAFETY_SETS[which])
+    if not send:
+        result = evaluate(eval_set)
+        lines = [
+            f"# רשימת הביטויים לבדה: {eval_set.ref}",
+            "",
+            f"משפטי סיכון שנמצאו: **{result.found}/{result.total}**. "
+            f"משפטים יום-יומיים שסומנו: {len(result.false_alarms)}/{result.near_misses}.",
+            "",
+            "עם המודל כרשת שנייה: אותה פקודה עם --send (עולה כמה סנטים).",
+        ]
+        return "\n".join(lines + ["", "## פוספסו", "", *[f"- {m}" for m in result.missed]])
+    uow = _uow()
+    with uow() as repos:
+        anonymizer = Anonymizer(load_roster(repos.staff, repos.trainees))
+    gate = SafetyGate(router_for("claude-haiku"))
+    return render_gate(evaluate_gate(eval_set, lambda text: gate.assess(text, anonymizer)))
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="python -m pacer.evaluation", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -271,6 +297,10 @@ def main(argv: list[str] | None = None) -> None:
     running.add_argument("--no-baseline", action="store_true", help="skip answering without the library")
     running.add_argument("--no-judge", action="store_true", help="skip the judge (code checks only)")
     running.add_argument("--out", type=Path, required=True, help="the report; the JSON summary goes next to it")
+    screening = commands.add_parser("safety", help="the safety gate on a risk set (--send: with the model)")
+    screening.add_argument("--set", dest="which", default="heldout", choices=list(SAFETY_SETS))
+    screening.add_argument("--send", action="store_true", help="also ask the model screen (costs a few cents)")
+    screening.add_argument("--out", type=Path)
     comparing = commands.add_parser("compare", help="the JSON summaries of several runs, side by side")
     comparing.add_argument("files", type=Path, nargs="+")
     comparing.add_argument("--out", type=Path)
@@ -283,6 +313,8 @@ def main(argv: list[str] | None = None) -> None:
         report = check()
     elif args.command == "masking":
         report = masking()
+    elif args.command == "safety":
+        report = safety(args.which, send=args.send)
     elif args.command == "compare":
         report = compare_runs(args.files)
     else:
