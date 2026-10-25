@@ -162,3 +162,13 @@ def test_abuse_and_sexual_harm_carry_the_reporting_duty_for_minors():
 def test_self_harm_says_to_remove_the_means():
     actions = " ".join(s.action for s in referral_for(SafetyCheck(frozenset({SELF_HARM}))).steps)
     assert "להרחיק אמצעים" in actions
+
+
+def test_the_held_out_set_is_measured_not_required():
+    """The honest number: sentences written by someone who never saw the patterns. The phrase list
+    finds about half (2026-10-25: 30/60). This only guards against getting worse; it is a floor, not
+    a goal, and the patterns are never tuned on these sentences."""
+    result = evaluate(load_safety_set(SAFETY_SET.with_name("safety-heldout-v1.json")))
+    assert result.total == 60
+    assert result.found >= 30
+    assert len(result.false_alarms) <= 4

@@ -25,7 +25,7 @@ from pacer.ai.safety import RiskKind, check_safety
 class SafetyCase(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    id: str = Field(pattern=r"^S\d{2,}$")
+    id: str = Field(pattern=r"^[SH]\d{2,}$")
     text: str = Field(min_length=5)
     expect: list[RiskKind] = Field(min_length=1)
 
@@ -33,7 +33,7 @@ class SafetyCase(BaseModel):
 class NearMiss(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    id: str = Field(pattern=r"^N\d{2,}$")
+    id: str = Field(pattern=r"^[NE]\d{2,}$")
     text: str = Field(min_length=5)
     why: str = Field(min_length=3)
 
