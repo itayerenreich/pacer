@@ -30,8 +30,10 @@ go through manager approval.
 
 On top of this data layer sit AI features: the text of a staff meeting becomes a
 summary and proposed tasks, and a counselor's notes from a personal talk become a
-summary, goal progress updates and notes worth remembering. The AI sits **above** the data,
-never instead of it: it proposes, and a person approves every item before anything changes.
+summary, goal progress updates and notes worth remembering. A **counselor coach** gives practical
+advice about a specific trainee, built on what already worked with them and on the academy's library.
+The AI sits **above** the data, never instead of it: it proposes, and a person approves every item
+before anything changes.
 
 ## Architecture
 
@@ -150,6 +152,35 @@ model broke its JSON on Hebrew abbreviations (רמב"ם) until Ollama was asked 
 Four cases are few, and a larger open model on a GPU could do far better: the runner can measure it
 (`--model`, `python -m pacer.evaluation compare`).
 
+## The counselor coach and its safety gate
+
+A counselor asks "how do I help Nadav take part in the group talks?" and gets steps they can start this
+week, built on Nadav's approved record: his goals, and notes on what **worked** with him and what did not
+(`POST /coach/ask`, `python -m pacer.demo.coach`).
+
+```
+question ─► permissions (404 if this counselor may not see him)
+         ─► safety gate: a phrase list in code, then Claude as a second net ──► exceptional incident?
+                                                                            the fixed procedure, no advice
+         ─► his record, built in code ─► health sentences out ─► anonymized as one text
+         ─► library passages (bge-m3, local) ─► Claude: understanding, steps, who to involve
+         ─► validation in code ─► advice + the procedure line on every answer
+```
+
+- **Grounded where it can be, marked where it cannot.** Each step is grounded only by a passage that was
+  really sent; anything else is labeled general advice. The code decides, not the model.
+- **One procedure for every exceptional incident** (self-harm, violence, abuse, sexual harm): immediate
+  danger, the manager, removing means, the reporting duty for minors, help lines. The same text every
+  time, never written by a model, so a wrong classification cannot drop a step.
+- **The safety gate, measured.** The first phrase list found 15 of 59 risk sentences an independent
+  reviewer wrote to break it. After fixing what that taught, **30 of 60** on a held-out set nobody tuned it on: it finds words, and subtle risk is described as a
+  scene ("stood on the roof at night"). With Claude as a second net that can only *add* a referral:
+  **60 of 60**, and no false alarm added (`python -m pacer.evaluation safety --send`). The screen sees
+  exactly the anonymized text the coach would send anyway, so it costs no privacy; if it fails, no
+  unscreened advice goes out.
+- **Measured personalization:** `python -m pacer.evaluation coach` answers each case with and without
+  the trainee's record, and a judge scores both on the same checklist.
+
 ## Stack
 
 Python 3.12 · uv · FastAPI · Pydantic · SQLAlchemy 2 · PostgreSQL 17 · Alembic · Docker ·
@@ -179,6 +210,8 @@ uv run python -m pacer.demo.meeting weekly --send   # summary and proposed tasks
 uv run python -m pacer.demo.talk maya --send        # a personal talk: progress and note proposals
 uv run python -m pacer.library ask "איך מתאימים את ההדרכה לחניך?" --send --out data/answer.md
 uv run python -m pacer.evaluation run --limit 1 --out data/eval-try.md   # the evaluation, on one case
+uv run python -m pacer.demo.coach "נדב הררי" "איך לעזור לו להשתתף יותר בשיחות הקבוצה?"         # dry run
+uv run python -m pacer.demo.coach "נדב הררי" "איך לעזור לו להשתתף יותר בשיחות הקבוצה?" --send  # the coach
 ```
 
 The library needs [Ollama](https://ollama.com) with `ollama pull bge-m3`, and the texts imported
@@ -210,5 +243,5 @@ CI runs ruff, mypy and the full suite on every pull request.
 | 2. Logic and API | services, roles, approvals, REST API, demo data, CI | done |
 | 3. AI core | LLM client, model routing, anonymization, meeting pipeline, talk summaries | done |
 | 4. Knowledge and quality | a curated library, RAG with citations, evaluation set, open vs commercial models | done |
-| 5. Counselor coach | case guidance grounded only in the library, safety layer, hybrid local/cloud pipeline | planned |
+| 5. Counselor coach | a two-layer safety gate, the trainee's approved record, advice grounded in the library where it can be | built; its evaluation runs next |
 | 6. Assistant and UI | tool-using agent, staff interface, demo | planned |

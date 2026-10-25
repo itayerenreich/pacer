@@ -235,6 +235,15 @@ COMPARED: list[tuple[str, str, str, str]] = [
     ("שיחות: הערות צפויות שנמצאו", "talks.masked", "notes_found", "pct"),
     ("שיחות: פרט רפואי בהצעה", "talks.masked", "forbidden_found", "num"),
     ("שיחות: שניות לשיחה", "talks.masked", "seconds_per_talk", "num"),
+    ("מלווה: תוצאה נכונה", "coach", "outcome_ok", "pct"),
+    ("מלווה: סעיפי בדיקה", "coach", "checklist", "pct"),
+    ("מלווה: סעיפים אישיים, עם הרשומה", "coach", "checklist_personal", "pct"),
+    ("מלווה: אותם סעיפים, בלי הרשומה", "coach", "checklist_personal_without_record", "pct"),
+    ("מלווה: מועילות (1-5)", "coach", "helpful", "num"),
+    ("מלווה: צעדים מבוססי מקור", "coach", "grounded_steps", "pct"),
+    ("מלווה: ציטוטים נתמכים", "coach", "claims_supported", "pct"),
+    ("מלווה: שניות לתשובה", "coach", "seconds_per_answer", "num"),
+    ("מלווה: עלות ($)", "coach", "cost_usd", "num"),
 ]
 
 
