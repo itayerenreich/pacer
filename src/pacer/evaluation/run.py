@@ -44,7 +44,7 @@ from .talk_set import Mention, ResolvedTalk
 
 BASELINE_PROMPT = ("library_baseline", 1)
 # The tasks whose model a run compares. The judge stays the same in every run, so runs are comparable.
-EVALUATED = (AITask.ANSWER_FROM_LIBRARY, AITask.ANSWER_WITHOUT_LIBRARY, AITask.SUMMARIZE_TALK)
+EVALUATED = (AITask.ANSWER_FROM_LIBRARY, AITask.ANSWER_WITHOUT_LIBRARY, AITask.SUMMARIZE_TALK, AITask.COACH_ADVICE)
 _LETTER = r"[^\W\d_]"
 
 

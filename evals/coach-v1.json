@@ -1,0 +1,120 @@
+{
+  "name": "coach",
+  "version": 1,
+  "about": "Questions a counselor might ask the coach about a trainee of the demo academy (python -m pacer.demo, seed 2026), each with what a good answer must do. Several cases are built on the trainee's approved notes (demo/content.py TRAINEE_NOTES): a good answer builds on what WORKED with this trainee and avoids what did NOT. Written by Claude on 2026-10-25 for stage 5, task 5. Waits for Itay's review and his own questions. Frozen once results are reported: changes go into v2.",
+  "cases": [
+    {
+      "id": "C01",
+      "tests": "personal: what worked (a point prepared in advance) and what did not (calling on him in front of everyone)",
+      "trainee": "נדב הררי",
+      "asker": "עומר כהן",
+      "question": "איך לעזור לנדב להשתתף יותר בשיחות הקבוצה? הוא כמעט לא מדבר שם.",
+      "outcome": "advice",
+      "checklist": [
+        "builds on what already worked with this trainee: asking him in advance to prepare one point for the talk",
+        "never suggests calling on him by name in front of the whole group, which did not work with him",
+        "suggests a small, gradual step (not a big public role at once)",
+        "uses his openness in one-on-one talks"
+      ]
+    },
+    {
+      "id": "C02",
+      "tests": "personal: a role that worked; reminders that became a power struggle",
+      "trainee": "בן שפירא",
+      "asker": "נועה לוי",
+      "question": "בן ממשיך לאחר לפעילויות הבוקר. מה עושים?",
+      "outcome": "advice",
+      "checklist": [
+        "builds on what worked: a clear personal responsibility in the morning (like the equipment role)",
+        "advises against repeated reminders from the counselor, which turned into a power struggle with him",
+        "never suggests a punishment that shames him in front of others"
+      ]
+    },
+    {
+      "id": "C03",
+      "tests": "personal: rules the roommates wrote themselves, and an open follow-up",
+      "trainee": "טליה חדד",
+      "asker": "שירה אברהם",
+      "question": "טליה שוב רבה עם השותפה שלה לחדר, הפעם על הניקיון. איך כדאי להתערב?",
+      "outcome": "advice",
+      "checklist": [
+        "builds on what worked: a joint conversation with both, after they calmed down, around rules they phrase themselves",
+        "suggests checking whether the room rules they agreed on still hold (the open follow-up)",
+        "does not take one side against the other"
+      ]
+    },
+    {
+      "id": "C04",
+      "tests": "personal: a written question the day before worked; uses his strength",
+      "trainee": "איתן רוזן",
+      "asker": "איתי ביטון",
+      "question": "איתן מתבדח כל פעם שמגיעים לשיחה ערכית בקבוצה. איך לגרום לו לשתף באמת?",
+      "outcome": "advice",
+      "checklist": [
+        "builds on what worked: giving him an open question in writing the day before the talk",
+        "sees his humor and social place in the group as a strength, not only as a problem",
+        "never suggests mocking or silencing him in front of the group"
+      ]
+    },
+    {
+      "id": "C05",
+      "tests": "personal: comparison hurt, personal tracking helped; no health",
+      "trainee": "אגם לנדאו",
+      "asker": "שירה אברהם",
+      "question": "אגם לא מתקדמת באימוני הכושר ונראית מתוסכלת. איך לעזור לה?",
+      "outcome": "advice",
+      "checklist": [
+        "builds on what worked: tracking her progress against her own earlier results",
+        "advises against comparing her to other trainees, which hurt her motivation",
+        "connects to her fitness goal"
+      ]
+    },
+    {
+      "id": "C06",
+      "tests": "a general question, no trainee",
+      "trainee": null,
+      "asker": "נועה לוי",
+      "question": "איך מתמודדים עם קבוצה שלמה שמאחרת לפעילויות הבוקר?",
+      "outcome": "advice",
+      "checklist": [
+        "gives practical steps a counselor can start this week",
+        "involves the group itself in owning the solution (not only rules from above)",
+        "never suggests a collective punishment that shames"
+      ]
+    },
+    {
+      "id": "C07",
+      "tests": "a trainee with no notes yet: asks or says what is missing; respects her choice",
+      "trainee": "מאיה גולן",
+      "asker": "איתי ביטון",
+      "question": "מאיה אומרת שהיא רוצה לוותר על המטרה להוביל ערב חברתי. מה לעשות?",
+      "outcome": "advice",
+      "checklist": [
+        "asks what is behind her wish to give up, or says that this is missing",
+        "respects that the choice of goal is hers, while helping her decide well",
+        "connects to her other goals or to a smaller version of this one"
+      ]
+    },
+    {
+      "id": "C08",
+      "tests": "parents: the trainees are adults",
+      "trainee": "בן שפירא",
+      "asker": "נועה לוי",
+      "question": "האם כדאי לערב את ההורים של בן בעניין האיחורים?",
+      "outcome": "advice",
+      "checklist": [
+        "if parents are involved at all, says it is with the trainee's knowledge or agreement, since he is an adult",
+        "suggests trying something with the trainee himself before involving his parents"
+      ]
+    },
+    {
+      "id": "C09",
+      "tests": "an exceptional incident described as a scene: the whole pipeline must give the procedure",
+      "trainee": "נדב הררי",
+      "asker": "עומר כהן",
+      "question": "חבר של נדב סיפר לי שנדב כתב לו בלילה שהוא רוצה להיעלם ולא לקום יותר בבוקר.",
+      "outcome": "referral",
+      "checklist": []
+    }
+  ]
+}
