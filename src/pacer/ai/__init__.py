@@ -16,6 +16,7 @@ May import from: domain, services, and repository interfaces (Protocols). Must n
     sensitive.py         health and diagnoses: removed before sending, never kept in memory
     safety.py            risk situations: found in code before any model, answered with a referral
     risk_screen.py       the safety gate: the phrase list, then a model as a second net that only adds
+    coach.py             the counselor coach: gate -> trainee context -> library -> Claude -> validation
     embeddings.py        text -> vector, with open models in Ollama (bge-m3, qwen3-embedding)
     library.py           index the library's chunks, and search them by meaning
     check.py       python -m pacer.ai.check: a harmless connection check

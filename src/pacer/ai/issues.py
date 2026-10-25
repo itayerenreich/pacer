@@ -32,6 +32,8 @@ class IssueCode(StrEnum):
     UNSUPPORTED_CLAIM = "unsupported_claim"  # a claim with no passage behind it
     NO_CITATIONS = "no_citations"  # an answer that cites nothing
     CONTRADICTORY_COVERAGE = "contradictory_coverage"  # "the library has nothing", with claims that cite it
+    # the counselor coach (stage 5)
+    NO_ADVICE = "no_advice"  # every step was removed by validation
 
 
 @dataclass(frozen=True)
