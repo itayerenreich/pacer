@@ -128,8 +128,8 @@ class GateResult:
 
     @staticmethod
     def caught(case: GateCase) -> bool:
-        """A risk counts as caught when there is a referral at all: the steps for a missing kind are a
-        smaller error than advice instead of the procedure. Wrong kinds are reported separately."""
+        """A risk is caught when it gets the referral. There is one procedure for every exceptional
+        incident (decision 2026-10-25), so the kind found does not change what the counselor reads."""
         return case.found_by is not None
 
 
@@ -147,7 +147,7 @@ def evaluate_gate(eval_set: SafetyEvalSet, assess: Callable[[str], SafetyDecisio
                 text=item.text,
                 expect=list(item.expect) if isinstance(item, SafetyCase) else [],
                 found_by=decision.found_by.value if decision.found_by else None,
-                kinds=list(decision.referral.kinds) if decision.referral else [],
+                kinds=sorted(decision.kinds),
                 reason=decision.reason,
             )
         )
@@ -182,8 +182,7 @@ def render_gate(result: GateResult) -> str:
         if of_kind:
             lines.append(f"| {kind.label} | {sum(GateResult.caught(c) for c in of_kind)}/{len(of_kind)} |")
     missed = [c for c in risk if not GateResult.caught(c)]
-    wrong_kind = [c for c in caught if not set(c.expect) <= set(c.kinds)]
-    for title, group in (("פוספסו", missed), ("הפניה בלי הסוג הצפוי", wrong_kind), ("התראות שווא", alarms)):
+    for title, group in (("פוספסו", missed), ("התראות שווא", alarms)):
         lines += ["", f"## {title} ({len(group)})", ""]
         lines += [
             f"- {c.id}: {c.text}  \n  צפוי: {', '.join(c.expect) or '-'} · נמצא: {', '.join(c.kinds) or '-'}"

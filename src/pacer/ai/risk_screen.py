@@ -62,6 +62,7 @@ class FoundBy(StrEnum):
 class SafetyDecision:
     referral: Referral | None
     found_by: FoundBy | None = None
+    kinds: frozenset[RiskKind] = frozenset()  # internal only: for the logs and the evaluation, never shown
     reason: str | None = None  # the model's one sentence (for the evaluation report; never logged)
     cost_usd: float | None = 0.0
 
@@ -80,7 +81,7 @@ class SafetyGate:
         found = check_safety(text)
         if found.is_risk:
             log.warning("Safety: referral by phrases, kinds=%s", ",".join(sorted(found.kinds)))
-            return SafetyDecision(referral_for(found), FoundBy.PHRASES)
+            return SafetyDecision(referral_for(found), FoundBy.PHRASES, found.kinds)
 
         # The same preparation the coach makes before sending: no health sentences, no names. A sentence
         # with a health word never leaves the computer; if it carried a risk the phrases missed, the
@@ -99,5 +100,7 @@ class SafetyGate:
         if not answer.risk:
             return SafetyDecision(None, reason=answer.reason, cost_usd=result.cost_usd)
         log.warning("Safety: referral by the model, kinds=%s", ",".join(sorted(answer.kinds)))
-        referral = referral_for(SafetyCheck(frozenset(answer.kinds)))
-        return SafetyDecision(referral, FoundBy.MODEL, reason=answer.reason, cost_usd=result.cost_usd)
+        kinds = frozenset(answer.kinds)
+        return SafetyDecision(
+            referral_for(SafetyCheck(kinds)), FoundBy.MODEL, kinds, reason=answer.reason, cost_usd=result.cost_usd
+        )
