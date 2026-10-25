@@ -185,3 +185,23 @@ def test_same_seed_same_academy_other_seed_different():
 def test_too_early_as_of_is_rejected():
     with pytest.raises(ValueError, match="3 weeks"):
         build_academy(fake_repos(), as_of=datetime(2026, 9, 10, tzinfo=UTC))
+
+
+def test_a_few_trainees_have_approved_notes_for_the_coach():
+    """The coach builds on what worked with a trainee: a few demo trainees have approved notes, written
+    by their primary counselor, about education only (no health word, nothing the safety gate would stop)."""
+    from pacer.ai.safety import check_safety
+    from pacer.ai.sensitive import is_sensitive
+    from pacer.demo import content
+
+    repos = empty_repos()
+    summary = build_academy(repos, as_of=datetime(2026, 10, 25, tzinfo=UTC))
+    by_name = {t.full_name: t for t in summary.trainees}
+    assert set(content.TRAINEE_NOTES) <= set(by_name)  # every name is a real demo trainee
+    for name, expected in content.TRAINEE_NOTES.items():
+        notes = repos.notes.list_by_trainee(by_name[name].key)
+        assert len(notes) == len(expected)
+        for note in notes:
+            assert note.author_id == by_name[name].primary_counselor_id
+            assert not is_sensitive(note.text) and not check_safety(note.text).is_risk, note.text
+    assert summary.note_count == sum(len(v) for v in content.TRAINEE_NOTES.values())
