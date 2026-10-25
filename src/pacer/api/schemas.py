@@ -17,6 +17,7 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field
 
 from pacer.ai.answer import AskResult, Coverage
+from pacer.ai.coach import CoachOutcome, CoachResult, InvolveRole
 from pacer.ai.issues import Issue, IssueCode
 from pacer.ai.meeting_pipeline import ExtractionResult
 from pacer.ai.talk_pipeline import TalkResult
@@ -219,6 +220,101 @@ class SummarizeResult(BaseModel):
             issues=[IssueOut.of(i) for i in result.issues],
             prompt=result.prompt_ref,
             attempts=result.attempts,
+            cost_usd=result.cost_usd,
+            removed_sentences=result.removed_sentences,
+        )
+
+
+# --- the counselor coach (stage 5) -------------------------------------------------------------
+
+
+class CoachQuestion(_Body):
+    question: str = Field(
+        min_length=5, max_length=2000, examples=["איך לעזור לו להשתתף יותר בשיחות הקבוצה?"]
+    )
+    trainee_id: int | None = Field(
+        default=None, description="The trainee the question is about; omit for a general question"
+    )
+
+
+class ReferralStepOut(BaseModel):
+    action: str
+    contact: str | None
+
+
+class ReferralOut(BaseModel):
+    """The fixed procedure for an exceptional incident. The same every time, never written by a model."""
+
+    message: str
+    steps: list[ReferralStepOut]
+
+
+class AdviceStepOut(BaseModel):
+    action: str
+    example: str | None = Field(description="A sentence the counselor could say to the trainee")
+    passages: list[str] = Field(description="The library passages it rests on; empty: general advice")
+    grounded: bool = Field(description="True when it rests on a passage of the library, false for general advice")
+
+
+class InvolveOut(BaseModel):
+    role: InvolveRole
+    label: str = Field(description="The role in Hebrew")
+    why: str
+
+
+class AdviceOut(BaseModel):
+    understanding: str
+    questions: list[str] = Field(description="What the coach would want to know to advise better")
+    steps: list[AdviceStepOut]
+    involve: list[InvolveOut] = Field(description="Who else should be part of this; often empty")
+    citations: list[CitationOut]
+    issues: list[IssueOut] = Field(description="What validation changed in the model's answer. Check these")
+
+
+class CoachOut(BaseModel):
+    """referral: an exceptional incident, the procedure only. advice: the coach's answer.
+    not_sent: the whole question was about health, so nothing was sent to any model."""
+
+    outcome: CoachOutcome
+    question: str
+    trainee_id: int | None
+    referral: ReferralOut | None
+    advice: AdviceOut | None
+    note: str = Field(description="Shown with every answer: what to do if this may be an exceptional incident")
+    prompt: str | None = Field(description="The exact prompt version of the advice, or null")
+    cost_usd: float | None
+    removed_sentences: int = Field(description="Sentences about health removed before anything was sent")
+
+    @classmethod
+    def of(cls, result: CoachResult) -> "CoachOut":
+        referral = None
+        if result.referral is not None:
+            referral = ReferralOut(
+                message=result.referral.message,
+                steps=[ReferralStepOut(action=s.action, contact=s.contact) for s in result.referral.steps],
+            )
+        advice = None
+        if result.advice is not None:
+            a = result.advice
+            advice = AdviceOut(
+                understanding=a.understanding,
+                questions=a.questions,
+                steps=[
+                    AdviceStepOut(action=s.action, example=s.example, passages=s.passages, grounded=s.grounded)
+                    for s in a.steps
+                ],
+                involve=[InvolveOut(role=role, label=role.label, why=why) for role, why in a.involve],
+                citations=[CitationOut(**vars(c)) for c in a.citations],
+                issues=[IssueOut.of(i) for i in a.issues],
+            )
+        return cls(
+            outcome=result.outcome,
+            question=result.question,
+            trainee_id=result.trainee_id,
+            referral=referral,
+            advice=advice,
+            note=result.note,
+            prompt=result.prompt_ref,
             cost_usd=result.cost_usd,
             removed_sentences=result.removed_sentences,
         )

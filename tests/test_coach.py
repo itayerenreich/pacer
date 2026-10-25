@@ -281,3 +281,88 @@ def test_an_invented_token_is_reported_and_left_as_written(repos, document):
 def test_evidence_level_reaches_the_citation(repos, document):
     citation = validate(advice(), one_hit(repos), document).citations[0]
     assert citation.evidence == EvidenceLevel.TRADITION.label and citation.cited
+
+
+# --- the API (task 4) ----------------------------------------------------------------------------
+
+
+@pytest.fixture
+def api(repos):
+    from fastapi.testclient import TestClient
+
+    from pacer.api.app import create_app
+    from pacer.api.dependencies import get_ai_router, get_db_engine, get_embedder, get_unit_of_work
+
+    cloud = FakeLLMClient(answers=[screen(), advice()], runs_locally=False)
+    app = create_app()
+    app.dependency_overrides = {
+        get_db_engine: lambda: (_ for _ in ()).throw(AssertionError("no database in these tests")),
+        get_unit_of_work: lambda: FakeUnitOfWork(repos),
+        get_ai_router: lambda: fake_router(cloud),
+        get_embedder: lambda: VectorEmbedder([1.0, 0.0], floor=0.4),
+    }
+    with TestClient(app) as client:
+        yield client, cloud
+
+
+def post(client, staff: int | None, **body):
+    headers = {} if staff is None else {"X-Staff-Id": str(staff)}
+    return client.post("/coach/ask", json=body, headers=headers)
+
+
+def test_the_api_gives_advice_with_grounding_and_the_procedure_line(api):
+    client, _ = api
+    response = post(client, 2, question=QUESTION, trainee_id=1)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["outcome"] == "advice" and body["referral"] is None and body["note"] == PROCEDURE_NOTE
+    assert [s["grounded"] for s in body["advice"]["steps"]] == [True, False]
+    assert body["advice"]["citations"][0]["evidence"] == "מקור ערכי-מסורתי"
+    assert body["prompt"] == "coach_advice@v1"
+
+
+def test_the_api_gives_the_procedure_for_an_exceptional_incident(api):
+    client, cloud = api
+    body = post(client, 2, question="נדב אמר שהוא רוצה למות", trainee_id=1).json()
+    assert body["outcome"] == "referral" and body["advice"] is None
+    assert body["referral"]["message"] == REFERRAL.message
+    assert body["referral"]["steps"][0]["contact"] == REFERRAL.steps[0].contact
+    assert cloud.calls == []
+
+
+def test_the_api_hides_a_trainee_of_another_group_and_needs_a_real_question(api):
+    client, cloud = api
+    assert post(client, 3, question=QUESTION, trainee_id=1).status_code == 404
+    assert post(client, 2, question=QUESTION, trainee_id=999).status_code == 404
+    assert post(client, None, question=QUESTION).status_code == 401
+    assert post(client, 2, question="?").status_code == 422
+    assert post(client, 2, question=QUESTION, trainee_id=1, extra="x").status_code == 422
+    assert cloud.calls == []
+
+
+def test_the_api_without_a_trainee_is_a_general_question(api):
+    client, _ = api
+    body = post(client, 3, question="איך מתמודדים עם קבוצה שמאחרת?").json()
+    assert body["outcome"] == "advice" and body["trainee_id"] is None
+
+
+def test_a_model_that_is_down_is_503_and_no_advice(repos):
+    from fastapi.testclient import TestClient
+
+    from pacer.ai import LLMUnavailableError
+    from pacer.api.app import create_app
+    from pacer.api.dependencies import get_ai_router, get_db_engine, get_embedder, get_unit_of_work
+
+    def down(_message: str) -> str:
+        raise LLMUnavailableError("down")
+
+    app = create_app()
+    app.dependency_overrides = {
+        get_db_engine: lambda: None,
+        get_unit_of_work: lambda: FakeUnitOfWork(repos),
+        get_ai_router: lambda: fake_router(FakeLLMClient(answers=down, runs_locally=False)),
+        get_embedder: lambda: VectorEmbedder([1.0, 0.0], floor=0.4),
+    }
+    with TestClient(app) as client:
+        response = post(client, 2, question=QUESTION, trainee_id=1)
+    assert response.status_code == 503 and "advice" not in response.json()
