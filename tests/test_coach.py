@@ -76,6 +76,7 @@ def screen(risk: bool = False, kinds: list[str] | None = None) -> str:
 
 def advice(**changes) -> str:
     answer = {
+        "risk": False,
         "understanding": "[TRAINEE_1] פתוח בשיחות אישיות ושותק בקבוצה. ידוע מה עבד איתו.",
         "questions": [],
         "steps": [
@@ -203,11 +204,13 @@ def test_an_approved_note_about_a_fight_does_not_make_every_question_a_referral(
     assert coach.ask(actor(repos, 2), QUESTION, trainee_id=1).outcome is CoachOutcome.ADVICE
 
 
-def test_a_question_only_about_health_is_not_sent_anywhere(uow, repos):
+def test_a_question_only_about_health_is_not_sent_to_the_coach_and_keeps_the_procedure(uow, repos):
     coach, cloud = coach_with(uow, screen(), advice())
     result = coach.ask(actor(repos, 2), "הוא התחיל לקחת ריטלין.", trainee_id=1)
     assert result.outcome is CoachOutcome.NOT_SENT and result.note == NOT_SENT_NOTE
-    assert cloud.calls == []
+    assert PROCEDURE_NOTE in result.note  # the review: the procedure line was gone here
+    assert [c.prompt.ref for c in cloud.calls] == ["risk_screen@v1"]  # screened, never advised
+    assert "ריטלין" not in cloud.calls[0].user_message
 
 
 def test_an_empty_question_is_refused(uow, repos):
@@ -366,3 +369,55 @@ def test_a_model_that_is_down_is_503_and_no_advice(repos):
     with TestClient(app) as client:
         response = post(client, 2, question=QUESTION, trainee_id=1)
     assert response.status_code == 503 and "advice" not in response.json()
+
+
+# --- the independent review's findings (2026-10-25) ----------------------------------------------
+
+
+def test_a_name_joined_by_a_maqaf_never_reaches_any_model(uow, repos):
+    coach, cloud = coach_with(uow, screen(), advice())
+    coach.ask(actor(repos, 2), "דיברתי עם\u05beנדב על הקבוצה, איך להמשיך?", trainee_id=1)
+    assert all("נדב" not in c.user_message for c in cloud.calls)
+
+
+def test_the_coach_itself_can_turn_advice_into_the_procedure(uow, repos):
+    coach, cloud = coach_with(uow, screen(), advice(risk=True))
+    result = coach.ask(actor(repos, 2), QUESTION, trainee_id=1)
+    assert result.outcome is CoachOutcome.REFERRAL and result.referral is REFERRAL and result.advice is None
+    assert result.prompt_ref == "coach_advice@v1"
+
+
+def test_a_general_question_never_completes_the_name_of_a_hidden_trainee(uow, repos):
+    """Dana leads another group: asking about "נדב" must not teach her "נדב הררי"."""
+    answer = advice(understanding="[TRAINEE_1] שותק בקבוצה, וכדאי לבנות איתו צעד קטן.")
+    coach, _ = coach_with(uow, screen(), answer)
+    result = coach.ask(actor(repos, 3), "איך לעזור לנדב להשתתף בקבוצה?")
+    assert "נדב" in result.advice.understanding and "הררי" not in result.advice.understanding
+
+
+def test_a_trainee_the_asker_may_see_keeps_the_full_name(uow, repos):
+    coach, _ = coach_with(uow, screen(), advice())
+    result = coach.ask(actor(repos, 2), "איך לעזור לנדב להשתתף בקבוצה?")
+    assert "נדב הררי" in result.advice.understanding
+
+
+def test_a_risk_about_a_trainee_of_another_group_gets_the_procedure_not_a_404(uow, repos):
+    coach, cloud = coach_with(uow, screen(), advice())
+    result = coach.ask(actor(repos, 3), "נדב אמר שהוא רוצה למות", trainee_id=1)
+    assert result.outcome is CoachOutcome.REFERRAL and cloud.calls == []
+
+
+def test_without_the_record_the_trainee_is_still_who_the_question_is_about(uow, repos):
+    """The baseline: the same permissions and the same reading of names; only the record is gone."""
+    coach, cloud = coach_with(uow, screen(), advice())
+    coach.ask(actor(repos, 2), QUESTION, trainee_id=1, use_record=False)
+    sent = cloud.calls[1].user_message
+    assert "[TRAINEE_1]" in sent and "[worked]" not in sent and "Trainee: none" in sent
+    with pytest.raises(NotFoundError):
+        coach.ask(actor(repos, 3), QUESTION, trainee_id=1, use_record=False)
+
+
+def test_a_whitespace_question_is_422_not_500(api):
+    client, _ = api
+    assert post(client, 2, question="          ", trainee_id=1).status_code == 422
+    assert client.post("/library/ask", json={"question": "        "}, headers={"X-Staff-Id": "1"}).status_code == 422

@@ -51,6 +51,17 @@ def is_sensitive(text: str) -> bool:
     return _SENSITIVE.search(text) is not None
 
 
+HEALTH_MASK = "[…]"
+
+
+def mask_sensitive_words(text: str) -> tuple[str, int]:
+    """The text with each health WORD replaced by HEALTH_MASK, and how many. For the safety screen
+    only (ai/risk_screen.py): removing whole sentences there would hide a risk scene that happens to
+    sit in a sentence about health ("the psychologist told me he stood on the roof at night"). The
+    scene goes to the screen, the medical words do not. Everywhere else, whole sentences are removed."""
+    return _SENSITIVE.subn(HEALTH_MASK, text)
+
+
 # A sentence ends at . ! ? or a line break. Hebrew notes rarely use anything else.
 _SENTENCE_END = re.compile(r"(?<=[.!?\n])")
 # A sentence that only continues the one before it: removed together with a removed one

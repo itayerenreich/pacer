@@ -40,7 +40,7 @@ lets later stages map a model's answer ("owner: [STAFF_2]") straight back to a s
 
 import re
 from collections import defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
@@ -321,14 +321,16 @@ def _set_aside(text: str, spans: Sequence[tuple[int, int]]) -> tuple[str, list[s
     return "".join(pieces) + text[last:], marked
 
 
-def deanonymize(text: str, source: AnonymizedText) -> str:
+def deanonymize(text: str, source: AnonymizedText, name_for: Callable[[Person], str] | None = None) -> str:
     """Tokens back to names, on this computer. Unknown tokens (invented by a model) stay as they
-    are, so a later validation step can notice them instead of silently guessing."""
+    are, so a later validation step can notice them instead of silently guessing.
+    name_for: how to write a person back (default: the full name). The coach uses it so that a
+    trainee the asker may not see comes back only as the asker wrote them, never completed."""
 
     def restore(match: re.Match) -> str:
         token = match.group(0)
         if person := source.people.get(token):
-            return person.full_name
+            return person.full_name if name_for is None else name_for(person)
         return source.unresolved.get(token, token)
 
     return _TOKEN.sub(restore, text)

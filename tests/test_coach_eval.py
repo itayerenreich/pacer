@@ -86,7 +86,7 @@ def test_a_whole_run_with_fake_models_scores_and_reports(academy):
             })
         if "Trainee:" in message:
             action = "לבקש ממנו שוב שיכין נקודה מראש" if "[worked]" in message else "שיחה אישית קצרה"
-            return json.dumps({"understanding": "מובן מה קורה כאן.", "questions": [],
+            return json.dumps({"risk": False, "understanding": "מובן מה קורה כאן.", "questions": [],
                                "steps": [{"action": action, "example": None, "passages": []}], "involve": []},
                               ensure_ascii=False)
         return json.dumps({"risk": False, "kinds": [], "reason": "nothing"})
@@ -104,3 +104,42 @@ def test_a_whole_run_with_fake_models_scores_and_reports(academy):
     assert summary["checklist_personal"] > summary["checklist_personal_without_record"]
     report = render_coach(results, summary, ["meta"])
     assert "## C01" in report and "| סעיף | עם הרשומה | בלי |" in report
+
+
+def _graded(checklist: list[str], verdicts: list, baseline: list | None = None):
+    from pacer.ai.coach import CoachOutcome, CoachResult
+    from pacer.evaluation.coach_eval import CoachCaseResult
+    from pacer.evaluation.judge import Grade
+
+    case = CoachCase(id="C01", tests="x", trainee="t", asker="a", question="שאלה ארוכה", outcome="advice", checklist=checklist)
+    result = CoachResult(CoachOutcome.ADVICE, "q", 1)
+    out = CoachCaseResult(case, result, 1.0, grade=Grade(checklist=verdicts, claims=[True, None], helpful=3, why="", cost_usd=0.0))
+    if baseline is not None:
+        out.baseline = result
+        out.baseline_grade = Grade(checklist=baseline, claims=[], helpful=2, why="", cost_usd=0.0)
+    return out
+
+
+def test_the_always_checked_item_is_not_part_of_the_personal_score():
+    """The review: a baseline that failed all 3 personal items scored 25%, from "no diagnosis"."""
+    from pacer.evaluation.coach_eval import coach_summary
+
+    summary = coach_summary([_graded(["a", "b", "c"], [True, True, True, True], baseline=[False, False, False, True])])
+    assert summary["checklist_personal"] == 1.0 and summary["checklist_personal_without_record"] == 0.0
+    assert summary["always_checked"] == 1.0
+
+
+def test_a_skipped_verdict_is_neither_a_pass_nor_a_fail():
+    from pacer.evaluation.coach_eval import coach_summary
+
+    summary = coach_summary([_graded(["a", "b", "c"], [True, None, True, True])])
+    assert summary["checklist"] == 1.0 and summary["skipped_verdicts"] == 1
+    assert summary["claims_supported"] == 1.0
+
+
+def test_the_judge_never_receives_a_health_sentence():
+    from pacer.ai.anonymization import Anonymizer, Roster
+    from pacer.evaluation.judge import answer_message
+
+    message = answer_message(Anonymizer(Roster([])), question="הוא לוקח ריטלין. איך לעזור?", answer="תשובה", checklist=["x"])
+    assert "ריטלין" not in message and "איך לעזור" in message

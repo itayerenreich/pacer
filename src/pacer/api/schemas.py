@@ -14,7 +14,7 @@ responses that combine several objects (the result of an AI pipeline) are at the
 from datetime import date
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from pacer.ai.answer import AskResult, Coverage
 from pacer.ai.coach import CoachOutcome, CoachResult, InvolveRole
@@ -122,8 +122,12 @@ class IssueOut(BaseModel):
         return cls(code=issue.code, item=issue.item, detail=issue.detail, section=issue.section)
 
 
+# A question is stripped first: "      " is not 6 characters of question, it is none (422, not a 500 later).
+Question = Annotated[str, StringConstraints(strip_whitespace=True, min_length=5)]
+
+
 class LibraryQuestion(_Body):
-    question: str = Field(min_length=5, max_length=1000, examples=["כמה חניכים יכול מדריך אחד ללוות כמו שצריך?"])
+    question: Question = Field(max_length=1000, examples=["כמה חניכים יכול מדריך אחד ללוות כמו שצריך?"])
 
 
 class CitationOut(BaseModel):
@@ -229,9 +233,7 @@ class SummarizeResult(BaseModel):
 
 
 class CoachQuestion(_Body):
-    question: str = Field(
-        min_length=5, max_length=2000, examples=["איך לעזור לו להשתתף יותר בשיחות הקבוצה?"]
-    )
+    question: Question = Field(max_length=2000, examples=["איך לעזור לו להשתתף יותר בשיחות הקבוצה?"])
     trainee_id: int | None = Field(
         default=None, description="The trainee the question is about; omit for a general question"
     )

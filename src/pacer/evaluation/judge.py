@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pacer.ai.anonymization import Anonymizer, Person
 from pacer.ai.llm_client import LLMClient
 from pacer.ai.prompts import load_prompt
+from pacer.ai.sensitive import remove_sensitive_sentences
 from pacer.ai.structured import complete_structured
 from pacer.domain import NoteKind
 
@@ -121,7 +122,9 @@ def answer_message(
     ]
     if claims:
         personal += ["", "CLAIMS:"] + [f"{i}. [{', '.join(ids)}] {text}" for i, (text, ids) in enumerate(claims, 1)]
-    lines = [anonymizer.anonymize("\n".join(personal)).text, "", "CHECKLIST:"]
+    # Health sentences out, then names: the judge is a cloud model like any other (review, 2026-10-25).
+    kept, _removed = remove_sensitive_sentences("\n".join(personal))
+    lines = [anonymizer.anonymize(kept).text, "", "CHECKLIST:"]
     lines += [f"{i}. {item}" for i, item in enumerate(checklist, 1)]
     if passages:
         lines += ["", "PASSAGES:"] + [f"[P{i}] {text}" for i, text in enumerate(passages, 1)]

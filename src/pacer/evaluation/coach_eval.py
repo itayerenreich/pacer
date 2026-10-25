@@ -162,18 +162,24 @@ def run_coach_case(
         passages=result.passages,
     )
     if baseline and resolved.trainee_id is not None:
-        general = coach.ask(actor, case.question, None)
-        out.baseline = general
-        if general.advice is not None:
-            out.baseline_grade = grade_answer(
-                judge,
-                anonymizer,
-                question=case.question,
-                answer=advice_text(general),
-                checklist=case.checklist,
-                claims=[(s.action, s.passages) for s in general.advice.steps if s.grounded],
-                passages=general.passages,
-            )
+        # The same question about the same trainee (same permissions, same reading of names), without
+        # the record: the only difference between the two answers is what the coach knows about them.
+        # A failure here is noted and the case is kept: its main answer and grade are already paid for.
+        try:
+            general = coach.ask(actor, case.question, resolved.trainee_id, use_record=False)
+            out.baseline = general
+            if general.advice is not None:
+                out.baseline_grade = grade_answer(
+                    judge,
+                    anonymizer,
+                    question=case.question,
+                    answer=advice_text(general),
+                    checklist=case.checklist,
+                    claims=[(s.action, s.passages) for s in general.advice.steps if s.grounded],
+                    passages=general.passages,
+                )
+        except Exception as error:  # noqa: BLE001 - reported in the case, the run goes on
+            out.notes.append(f"baseline failed: {type(error).__name__}")
     return out
 
 
@@ -181,26 +187,41 @@ def _rate(part: int, whole: int) -> float | None:
     return None if whole == 0 else round(part / whole, 3)
 
 
-def _checklist(grades: Sequence[Grade | None], count: int | None = None) -> float | None:
-    """Passed items of the case's own checklist (the first `count` of each grade), or of all of it."""
-    verdicts = [v for g in grades if g is not None for v in (g.checklist[:count] if count else g.checklist)]
-    return _rate(sum(v is True for v in verdicts), len(verdicts))
+def _checklist(results: Sequence[CoachCaseResult], *, baseline: bool = False) -> tuple[float | None, int]:
+    """The share of the CASE's own checklist items that passed, and how many verdicts the judge skipped.
+    Each grade ends with the items every answer is checked on (judge.ALWAYS_CHECKED): they are not part
+    of the case's checklist, so they are left out here and reported on their own (always_checked).
+    A skipped verdict (None) is neither a pass nor a fail."""
+    verdicts: list[bool | None] = []
+    for r in results:
+        grade = r.baseline_grade if baseline else r.grade
+        if grade is not None:
+            verdicts += grade.checklist[: len(r.case.checklist)]
+    known = [v for v in verdicts if v is not None]
+    return _rate(sum(known), len(known)), len(verdicts) - len(known)
+
+
+def _always_checked(results: Sequence[CoachCaseResult]) -> float | None:
+    known = [v for r in results if r.grade for v in r.grade.checklist[len(r.case.checklist) :] if v is not None]
+    return _rate(sum(known), len(known))
 
 
 def coach_summary(results: Sequence[CoachCaseResult]) -> dict:
     advised = [r for r in results if r.case.outcome == "advice"]
     with_trainee = [r for r in advised if r.case.trainee is not None and r.baseline_grade is not None]
-    claims = [v for r in advised if r.grade for v in r.grade.claims]
+    claims = [v for r in advised if r.grade for v in r.grade.claims if v is not None]
     helpful = [r.grade.helpful for r in advised if r.grade]
     costs = [r.result.cost_usd for r in results] + [r.baseline.cost_usd for r in results if r.baseline]
     judge_costs = [g.cost_usd for r in results for g in (r.grade, r.baseline_grade) if g]
     return {
         "cases": len(results),
         "outcome_ok": _rate(sum(r.outcome_ok for r in results), len(results)),
-        "checklist": _checklist([r.grade for r in advised]),
-        # personal cases only, with and without the trainee's record, on the same items
-        "checklist_personal": _checklist([r.grade for r in with_trainee]),
-        "checklist_personal_without_record": _checklist([r.baseline_grade for r in with_trainee]),
+        "checklist": _checklist(advised)[0],
+        # personal cases only (those with a baseline), with and without the record, on the same items
+        "checklist_personal": _checklist(with_trainee)[0],
+        "checklist_personal_without_record": _checklist(with_trainee, baseline=True)[0],
+        "always_checked": _always_checked(advised),  # no diagnosis, no medical labels, no treatment advice
+        "skipped_verdicts": _checklist(advised)[1] + _checklist(with_trainee, baseline=True)[1],
         "helpful": None if not helpful else round(sum(helpful) / len(helpful), 2),
         "grounded_steps": _rate(sum(r.grounded for r in advised), sum(r.steps for r in advised)),
         "claims_supported": _rate(sum(v is True for v in claims), len(claims)),
@@ -229,6 +250,7 @@ def render_coach(results: Sequence[CoachCaseResult], summary: dict, meta: Sequen
         f"| סעיפי בדיקה שעברו | {_pct(summary['checklist'])} |",
         f"| סעיפים אישיים, **עם** הרשומה של החניך | {_pct(summary['checklist_personal'])} |",
         f"| אותם סעיפים, **בלי** הרשומה | {_pct(summary['checklist_personal_without_record'])} |",
+        f"| בלי אבחנה, תוויות רפואיות או עצה טיפולית | {_pct(summary['always_checked'])} |",
         f"| מועילות (שופט, 1-5) | {summary['helpful'] or '-'} |",
         f"| צעדים מבוססי מקור | {_pct(summary['grounded_steps'])} |",
         f"| ציטוטים שהקטע באמת תומך בהם | {_pct(summary['claims_supported'])} |",
@@ -249,6 +271,8 @@ def render_coach(results: Sequence[CoachCaseResult], summary: dict, meta: Sequen
                 without = r.baseline_grade.checklist[i] if r.baseline_grade else None
                 lines.append(f"| {item} | {_mark(verdicts[i])} | {_mark(without)} |")
             lines += ["", f"מועילות: {r.grade.helpful}/5. {r.grade.why}"]
+        if r.notes:
+            lines += ["", "הערות: " + "; ".join(r.notes)]
         if r.result.advice and r.result.advice.issues:
             issues = "; ".join(f"{i.code} ({i.section} {i.item}): {i.detail}" for i in r.result.advice.issues)
             lines += ["", f"בעיות: {issues}"]

@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from pacer.ai import LLMError
-from pacer.ai.anonymization import Anonymizer, load_roster
+from pacer.ai.anonymization import AnonymizationError, Anonymizer, load_roster
 from pacer.ai.answer import PROMPT_VERSION as ANSWER_PROMPT_VERSION
 from pacer.ai.answer import LibraryAnswerer
 from pacer.ai.coach import PROMPT_VERSION as COACH_PROMPT_VERSION
@@ -37,6 +37,7 @@ from pacer.library.chunking import DEFAULT_CHUNKING
 from pacer.library.manifest import load_manifest
 from pacer.logging_config import configure_logging, use_utf8_console
 from pacer.repositories import get_engine, repositories
+from pacer.services import ServiceError
 
 from .coach_eval import CoachCaseResult, coach_summary, load_coach_set, render_coach, resolve_cases, run_coach_case
 from .library_set import load_library_set, unknown_sources
@@ -325,7 +326,7 @@ def coach_run(model: str, *, limit: int | None, baseline: bool, judge: bool) -> 
             print(f"coach {item.case.id} ...", flush=True)
             try:
                 results.append(run_coach_case(item, coach, actors, judge_client, anonymizer, baseline=baseline))
-            except (LLMError, StructuredOutputError) as error:
+            except (LLMError, AnonymizationError, ServiceError, ValueError) as error:  # one case, not the run
                 failed.append(_failure(item.case.id, error))
     except KeyboardInterrupt:
         interrupted = True

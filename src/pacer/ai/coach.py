@@ -2,8 +2,11 @@
 
     coach.ask(actor, question, trainee_id=None)  ->  CoachResult (a referral, advice, or not sent)
 
-    0. permissions  may this actor see the trainee? Otherwise 404, before anything else happens.
-    1. safety       SafetyGate on the QUESTION (phrases, then a model). An exceptional incident gets the
+    0. phrases      the safety phrase list, on the question, locally. It depends on nothing about the
+                    trainee, so it runs even before permissions: a risk about a trainee of another group
+                    gets the procedure, not a 404.
+    1. permissions  may this actor see the trainee? Otherwise 404, before any model.
+    2. screen       the model screen of SafetyGate, on the QUESTION. An exceptional incident gets the
                     fixed procedure and nothing else (decision 2026-10-25: the gate checks the question
                     only; an approved note like "separated after a fight" must not turn every question
                     about that trainee into a referral).
@@ -15,7 +18,9 @@
     6. validate     in code: cited passages must have been sent; a step's grounding is DECIDED by its valid
                     citations (none = "general advice", decision 2026-10-25: grounded where it can be,
                     marked where it cannot); nothing about health; tokens must be known
-    7. answer       names restored, and the procedure line added to every answer, in code
+    7. answer       names restored (a trainee the asker may not see only as the asker wrote them), and
+                    the procedure line added to every answer, in code. If the coach itself sets `risk`,
+                    its advice is dropped and the procedure is the answer: a third net, at no extra cost.
 
 Unlike /library/ask, no passage is not "no answer": the coach still advises, and every step says
 whether it rests on a source. The library is small; honesty about grounding is what makes that safe.
@@ -25,7 +30,7 @@ No transaction is open while a model works: one short read, then models.
 
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 
@@ -34,11 +39,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from pacer.domain import StaffMember
 from pacer.repositories import ScoredChunk, UnitOfWork
 from pacer.services import CoachContextService, TraineeContext
+from pacer.services.permissions import can_view_trainee
 
 from .anonymization import (
     AnonymizationError,
     AnonymizedText,
     Anonymizer,
+    Person,
     PersonKind,
     Roster,
     deanonymize,
@@ -52,7 +59,7 @@ from .library import retrieve
 from .prompts import Prompt, load_prompt
 from .risk_screen import SafetyGate
 from .routing import AITask, Router
-from .safety import Referral
+from .safety import REFERRAL, Referral, check_safety, referral_for
 from .sensitive import is_sensitive, remove_sensitive_sentences
 from .structured import complete_structured
 
@@ -68,7 +75,7 @@ PROCEDURE_NOTE = (
 # When nothing of the question is left after the health sentences are removed.
 NOT_SENT_NOTE = (
     "השאלה עוסקת במידע בריאותי, ש-Pacer לא שולח למודל ולא מייעץ בו. "
-    "כדאי להתייעץ עם המנהל או עם גורם מקצועי."
+    "כדאי להתייעץ עם המנהל או עם גורם מקצועי. " + PROCEDURE_NOTE
 )
 WITHHELD_UNDERSTANDING = "(הסבר המצב הושמט: עסק בבריאות)"
 
@@ -117,6 +124,10 @@ class Involve(BaseModel):
 class CoachAnswer(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    risk: bool = Field(
+        description="True if, despite the safety check, the text suggests someone may be at risk: the code then "
+        "gives the academy's procedure instead of this advice"
+    )
     understanding: str = Field(min_length=10, max_length=1500, description="Hebrew, 2 to 4 sentences")
     questions: list[str] = Field(max_length=3, description="Short clarifying questions, only when it matters")
     steps: list[CoachStep] = Field(min_length=1, max_length=6, description="2 to 5 practical steps, in order")
@@ -155,11 +166,13 @@ class PreparedMessage:
 
 
 def prepare_coach_message(
-    roster: Roster, question: str, context: TraineeContext | None
+    roster: Roster, question: str, context: TraineeContext | None, *, about: Person | None = None
 ) -> PreparedMessage:
-    """The exact text that leaves the computer. One function for the coach AND the dry run."""
+    """The exact text that leaves the computer. One function for the coach AND the dry run.
+    about: who the question is about when the record is NOT sent (the evaluation's baseline), so that
+    an ambiguous name is read the same way as with the record."""
     anonymizer = Anonymizer(roster)
-    prefer = []
+    prefer = [about] if about is not None else []
     if context is not None and (person := roster.find(PersonKind.TRAINEE, context.trainee.key)):
         prefer.append(person)
     kept_question, _ = remove_sensitive_sentences(question)
@@ -214,7 +227,14 @@ class Advice:
 _PASSAGE_ID = re.compile(r"^P\d{1,2}$")
 
 
-def validate_coach(raw: CoachAnswer, hits: Sequence[ScoredChunk], document: AnonymizedText) -> Advice:
+def validate_coach(
+    raw: CoachAnswer,
+    hits: Sequence[ScoredChunk],
+    document: AnonymizedText,
+    name_for: Callable[[Person], str] | None = None,
+) -> Advice:
+    """name_for: how a person's token is written back (see Coach: a trainee the asker may not see comes
+    back only as the asker wrote them). The default is the full name."""
     sent = set(passage_ids(list(hits)))
     known_tokens = set(document.people) | set(document.unresolved)
     issues: list[Issue] = []
@@ -222,7 +242,7 @@ def validate_coach(raw: CoachAnswer, hits: Sequence[ScoredChunk], document: Anon
     def restore(text: str, item: int | None, section: str | None) -> str:
         if invented := sorted(set(tokens_in(text)) - known_tokens):
             issues.append(Issue(IssueCode.UNKNOWN_TOKEN, item, f"left as written: {', '.join(invented)}", section))
-        return deanonymize(text, document)
+        return deanonymize(text, document, name_for)
 
     def health(item: int | None, section: str) -> None:
         issues.append(Issue(IssueCode.SENSITIVE_TEXT, item, "health or diagnosis; not shown", section))
@@ -290,7 +310,7 @@ def validate_coach(raw: CoachAnswer, hits: Sequence[ScoredChunk], document: Anon
 
 
 class CoachOutcome(StrEnum):
-    REFERRAL = "referral"  # an exceptional incident: the procedure, no advice
+    REFERRAL = "referral"  # an exceptional incident (phrases, the screen, or the coach itself): the procedure
     ADVICE = "advice"
     NOT_SENT = "not_sent"  # the whole question was about health: nothing left the computer
 
@@ -335,11 +355,22 @@ class Coach:
         self._k = k
         self._prompt = prompt or load_prompt("coach_advice", PROMPT_VERSION)
 
-    def ask(self, actor: StaffMember, question: str, trainee_id: int | None = None) -> CoachResult:
+    def ask(
+        self, actor: StaffMember, question: str, trainee_id: int | None = None, *, use_record: bool = True
+    ) -> CoachResult:
+        """use_record=False: the trainee is checked (404) and named, but their record is not sent. The
+        evaluation's baseline uses it, so that the only difference between the two runs is the record."""
         if not question.strip():
             raise ValueError("The question is empty")
 
-        # 0 + 2. Permissions and context, in one short transaction (404 before anything else).
+        # 0. The phrase list first: local, and it depends on nothing about the trainee, so it reveals
+        #    nothing. A risk about a trainee of another group still gets the procedure, not a 404.
+        found = check_safety(question)
+        if found.is_risk:
+            log.warning("Coach: referral (by phrases) for trainee %s, staff %s", trainee_id, actor.id)
+            return CoachResult(CoachOutcome.REFERRAL, question, trainee_id, referral=referral_for(found))
+
+        # 1. Permissions and context, in one short transaction (404 before any model).
         with self._uow() as repos:
             context = None
             if trainee_id is not None:
@@ -347,8 +378,13 @@ class Coach:
                     repos.trainees, repos.groups, repos.goals, repos.goal_updates, repos.notes
                 ).build(actor, trainee_id)
             roster = load_roster(repos.staff, repos.trainees)
+            visible = {
+                t.key
+                for t in repos.trainees.list_all()
+                if (group := repos.groups.get(t.group_id)) is not None and can_view_trainee(actor, group)
+            }
 
-        # 1. Safety, on the question.
+        # 2. The model screen, on the question.
         about = roster.find(PersonKind.TRAINEE, trainee_id) if trainee_id is not None else None
         decision = self._gate.assess(question, Anonymizer(roster), prefer=(about,) if about else ())
         if decision.is_risk:
@@ -358,7 +394,9 @@ class Coach:
             )
 
         # 3. Minimize and anonymize.
-        prepared = prepare_coach_message(roster, question, context)
+        prepared = prepare_coach_message(
+            roster, question, context if use_record else None, about=about if not use_record else None
+        )
         if not prepared.question_left:
             return CoachResult(
                 CoachOutcome.NOT_SENT,
@@ -380,7 +418,19 @@ class Coach:
         result = complete_structured(
             client, self._prompt, coach_message(prepared.document, hits), CoachAnswer, max_tokens=max_tokens
         )
-        advice = validate_coach(result.value, hits, prepared.document)
+        cost = _total(decision.cost_usd, result.cost_usd)
+        if result.value.risk:  # the coach itself saw a risk: the procedure replaces its advice
+            log.warning("Coach: referral (by the coach) for trainee %s, staff %s", trainee_id, actor.id)
+            return CoachResult(
+                CoachOutcome.REFERRAL,
+                question,
+                trainee_id,
+                referral=REFERRAL,
+                prompt_ref=result.prompt_ref,
+                cost_usd=cost,
+                removed_sentences=prepared.removed,
+            )
+        advice = validate_coach(result.value, hits, prepared.document, _names_as_written(question, visible))
         log.info(
             "Coach: advice for trainee %s, asked by staff %s: steps=%s grounded=%s involve=%s issues=%s removed=%s",
             trainee_id,
@@ -397,7 +447,23 @@ class Coach:
             trainee_id,
             advice=advice,
             prompt_ref=result.prompt_ref,
-            cost_usd=_total(decision.cost_usd, result.cost_usd),
+            cost_usd=cost,
             removed_sentences=prepared.removed,
             passages=[hit.chunk.text for hit in hits],
         )
+
+
+def _names_as_written(question: str, visible: set[int]) -> Callable[[Person], str]:
+    """Staff, and trainees the asker may see: the full name. Any other trainee: only as the asker wrote
+    them, never completed ("נדב" stays "נדב", not "נדב הררי"), so a general question cannot be used to
+    learn who is in another group (independent review, 2026-10-25)."""
+
+    def name_for(person: Person) -> str:
+        if person.kind is PersonKind.STAFF or person.id in visible:
+            return person.full_name
+        for form in (person.full_name, person.first_name, person.last_name):
+            if form in question:
+                return form
+        return "חניך/ה"
+
+    return name_for
