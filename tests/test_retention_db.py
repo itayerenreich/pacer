@@ -48,14 +48,15 @@ def test_purge_notes_shows_first_and_deletes_only_with_yes(engine, academy, caps
 
     maintenance.main(["purge-notes"], now=later)
     assert "1 notes and 1 talks of 1 trainees" in capsys.readouterr().out
-    assert count(engine, "trainee_notes") == 1  # only shown
+    demo = academy.note_count  # the demo's own notes belong to active trainees: never purged
+    assert count(engine, "trainee_notes") == demo + 1  # only shown
 
     maintenance.main(["purge-notes", "--days", "500", "--yes"], now=later)
-    assert count(engine, "trainee_notes") == 1  # within a longer period: kept
+    assert count(engine, "trainee_notes") == demo + 1  # within a longer period: kept
 
     maintenance.main(["purge-notes", "--yes"], now=later)
     assert "Deleted 1 notes and 1 talks." in capsys.readouterr().out
-    assert (count(engine, "trainee_notes"), count(engine, "personal_talks"), count(engine, "talk_proposals")) == (0, 0, 0)
+    assert (count(engine, "trainee_notes"), count(engine, "personal_talks"), count(engine, "talk_proposals")) == (demo, 0, 0)
 
 
 def test_purge_with_nothing_to_delete_says_so(engine, academy, capsys):
