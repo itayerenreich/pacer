@@ -1,5 +1,6 @@
 """The safety layer: every risk in the set is found, everyday words are not, and the referral is fixed."""
 
+import time
 from pathlib import Path
 
 import pytest
@@ -39,39 +40,61 @@ def test_the_set_covers_every_kind():
     ("text", "kind"),
     [
         ("וכשהתאבדותו של חבר עלתה בשיחה", SELF_HARM),  # prefix letters: ו כ ש
-        ("ה-אלימות בחדר", VIOLENCE),  # a maqaf after the prefix
+        ("ה\u05beאלימות בחדר", VIOLENCE),  # a real maqaf (U+05BE) after the prefix
+        ("ה-אלימות בחדר", VIOLENCE),  # an ASCII hyphen
+        ("הוא אמר שהוא רוצה\u05beלמות", SELF_HARM),  # a maqaf BETWEEN the words of a phrase
+        ("פוגע,בעצמו", SELF_HARM),  # a comma with no space
         ("הִתְאַבֵּד", SELF_HARM),  # niqqud
-        ("הת‏אבד", SELF_HARM),  # an invisible bidi mark inside the word
-        ("להרביץ", VIOLENCE),
-        ("ATTACK", None),  # nothing in English is on the list
+        ("הת\u200fאבד", SELF_HARM),  # an invisible bidi mark inside the word
+        ("הת\u200bאבד", SELF_HARM),  # a zero-width space inside the word
     ],
 )
 def test_words_are_found_however_they_are_written(text, kind):
-    assert check_safety(text).kinds == (frozenset({kind}) if kind else frozenset())
+    assert check_safety(text).kinds == frozenset({kind})
 
 
 @pytest.mark.parametrize(
     "text",
-    [
-        "שתקיפות",  # ש + תקיפות: a prefix, found (over-matching is the safe direction)
-        "מאיימים",
-    ],
+    ["אני אתאבד", "הוא יתאבד", "היא תתאבד", "הם יתאבדו", "נתאבד", "אני אפגע בעצמי", "הוא יפגע בעצמו"],
 )
-def test_prefixed_forms_are_found(text):
-    assert check_safety(text).is_risk
+def test_every_person_and_tense_is_found(text):
+    assert SELF_HARM in check_safety(text).kinds
 
 
 @pytest.mark.parametrize(
     "text",
     [
+        "אל תאבד תקווה",  # lose, not kill oneself: why the future forms are listed one by one
+        "פגיעה בעצמאות של החניכים",  # independence, not "עצמו"
         "האישור תקף עד יום חמישי",  # valid
-        "חיתוך ירקות בתורנות",
         "אלימלך הגיע לשיחה",  # a name that starts like "אלים"
-        "פעילות על מיתולוגיה",
+        "אבא שלו מכהן כראש המועצה",  # starts like "מכה"
+        "רבין נרצח ב-1995",  # history
+        "בתורנות הוא חתך את היד בטעות",  # an accident
     ],
 )
-def test_words_inside_other_words_are_not_found(text):
+def test_near_words_are_not_found(text):
+    """Each of these was a false alarm in the review (or is one step away from one)."""
     assert not check_safety(text).is_risk
+
+
+def test_harm_by_a_family_member_is_also_abuse():
+    """The kind decides the steps: abuse adds the reporting duty, which violence alone does not."""
+    for text in ("אבא שלה הרביץ לה בשבת", "אח שלו הגדול מכה אותו", "אמא שלו מרביצה לו"):
+        assert ABUSE in check_safety(text).kinds, text
+
+
+def test_sexual_abuse_is_also_sexual_harm():
+    assert {ABUSE, SEXUAL} <= check_safety("הוא מתעלל בה מינית").kinds
+
+
+def test_long_text_is_fast():
+    """No catastrophic backtracking: a 20,000-character text of near-matches takes milliseconds."""
+    texts = ["פוגע " * 4000, "לא רוצה " * 2500, "ה-" * 10000, "אבא שלו " * 2500]
+    started = time.perf_counter()
+    for text in texts:
+        check_safety(text)
+    assert time.perf_counter() - started < 1.0
 
 
 def test_a_long_gap_does_not_join_unrelated_words():
@@ -126,3 +149,16 @@ def test_the_message_names_the_kinds_in_hebrew():
 def test_no_referral_without_a_risk():
     with pytest.raises(ValueError):
         referral_for(SafetyCheck(frozenset()))
+
+
+def test_abuse_and_sexual_harm_carry_the_reporting_duty_for_minors():
+    for kind in (ABUSE, SEXUAL):
+        actions = " ".join(s.action for s in referral_for(SafetyCheck(frozenset({kind}))).steps)
+        assert "מתחת לגיל 18" in actions and "חובת דיווח" in actions
+    actions = " ".join(s.action for s in referral_for(SafetyCheck(frozenset({VIOLENCE}))).steps)
+    assert "חובת דיווח" not in actions  # a fight between trainees is not, by itself, a report
+
+
+def test_self_harm_says_to_remove_the_means():
+    actions = " ".join(s.action for s in referral_for(SafetyCheck(frozenset({SELF_HARM}))).steps)
+    assert "להרחיק אמצעים" in actions
