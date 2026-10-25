@@ -154,3 +154,7 @@ def test_the_held_out_set_is_measured_not_required():
     assert result.total == 60
     assert result.found >= 30
     assert len(result.false_alarms) <= 4
+
+
+def test_paseq_between_words_is_a_space_too():
+    assert check_safety("רוצה׀למות").kinds == {SELF_HARM}

@@ -188,9 +188,10 @@ _PATTERNS: dict[RiskKind, list[str]] = {
 
 # Niqqud and invisible characters (bidi marks, zero-width spaces) would split a word in two:
 # "הִתְאַבֵּד" and "הת<zero-width>אבד" must be found like "התאבד". The maqaf (U+05BE) sits inside the
-# niqqud range but joins two WORDS, so it is left out here and turned into a space below.
-_INVISIBLE = re.compile("[\u0591-\u05bd\u05bf-\u05c7\u00ad\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]")
-_SPACE = re.compile(r"[-\u05be\u2010-\u2015\u2212,;:!?.()\[\]\"'/\\\u05f4\u05f3\u201c\u201d\u2018\u2019`\u00b4\u2026]+")
+# niqqud range but joins two WORDS, so it is left out here and turned into a space below; so are paseq,
+# sof pasuq and nun hafukha (U+05C0, U+05C3, U+05C6).
+_INVISIBLE = re.compile("[\u0591-\u05bd\u05bf\u05c1\u05c2\u05c4\u05c5\u05c7\u00ad\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]")
+_SPACE = re.compile(r"[-\u05be\u05c0\u05c3\u05c6\u2010-\u2015\u2212,;:!?.()\[\]\"'/\\\u05f4\u05f3\u201c\u201d\u2018\u2019`\u00b4\u2026]+")
 _COMPILED = {kind: re.compile("|".join(patterns)) for kind, patterns in _PATTERNS.items()}
 
 

@@ -55,7 +55,12 @@ _NOT_LETTER_BEFORE = rf"(?<!{_LETTER})"
 _NOT_LETTER_AFTER = rf"(?!{_LETTER})"
 # Invisible characters that split a name without changing how it looks: niqqud and cantillation,
 # zero-width characters, the soft hyphen, and direction marks. Removed from the text first.
-_INVISIBLE = re.compile("[\u0591-\u05c7\u00ad\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]")
+# NOT the Hebrew punctuation that sits in the same Unicode block: the maqaf (U+05BE) and paseq, sof
+# pasuq and nun hafukha (U+05C0, U+05C3, U+05C6) separate WORDS. Removed, "עם־נדב" became one word,
+# "עםנדב", and the name went to the cloud (found by an independent review, 2026-10-25).
+_INVISIBLE = re.compile(
+    "[\u0591-\u05bd\u05bf\u05c1\u05c2\u05c4\u05c5\u05c7\u00ad\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]"
+)
 # Separators inside a name: spaces and every kind of hyphen and dash. "בר-און", "בר און", "בר־און",
 # "בר‑און" and even "בראון" are the same last name.
 _SEPARATORS = " -\u05be\u2010\u2011\u2012\u2013\u2014\u2212"

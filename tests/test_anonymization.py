@@ -434,3 +434,28 @@ def test_marked_spans_must_be_inside_the_text_and_not_overlap(anonymizer):
 
 def test_slot_characters_in_a_text_without_marks_are_harmless(anonymizer):
     assert anonymizer.anonymize("א \ue0007\ue001 ב").text == "א \ue0007\ue001 ב"
+
+
+# --- Hebrew punctuation between words (independent review, 2026-10-25) -----------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("דיברתי עם־מאיה", "דיברתי עם־[TRAINEE_6]"),  # a maqaf joins a word to the name
+        ("מאיה־היא רצה", "[TRAINEE_6]־היא רצה"),  # and the name to a word
+        ("אוחיון־שלה", "[TRAINEE_6]־שלה"),
+        ("נועה׀מאיה", "[STAFF_2]׀[TRAINEE_6]"),  # paseq
+        ("רצה עם מאיה׃", "רצה עם [TRAINEE_6]׃"),  # sof pasuq
+    ],
+)
+def test_hebrew_punctuation_separates_words_and_never_hides_a_name(anonymizer, text, expected):
+    """The maqaf was removed with the niqqud (the same Unicode block), so "עם־מאיה" became one word,
+    "עםמאיה", that neither check found: the name went to the cloud. The maqaf separates words."""
+    safe = anonymizer.anonymize(text)
+    assert safe.text == expected
+    assert not anonymizer.contains_known_name(safe.text)
+
+
+def test_niqqud_inside_a_name_is_still_removed(anonymizer):
+    assert anon(anonymizer, "מָאיָה רצה") == "[TRAINEE_6] רצה"
