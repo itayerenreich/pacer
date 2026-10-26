@@ -32,13 +32,15 @@ import logging
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
+from datetime import date
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from pacer.domain import StaffMember
+from pacer.domain import StaffMember, academy_today
 from pacer.repositories import ScoredChunk, UnitOfWork
 from pacer.services import CoachContextService, TraineeContext
+from pacer.services.coach_context import ATTENDANCE_DAYS
 from pacer.services.permissions import can_view_trainee
 
 from .anonymization import (
@@ -157,11 +159,31 @@ def coach_document(question: str, context: TraineeContext | None) -> str:
         lines += [f"  - {u.created_at:%Y-%m-%d}: {u.progress}% · {u.note}" for u in item.recent_updates]
     if not context.goals:
         lines.append("- (no goals yet)")
+    lines += _attendance_lines(context)
     lines.append("Notes approved by counselors (oldest first):")
     lines += [f"- [{note.kind}] {note.created_at:%Y-%m-%d}: {note.text}" for note in context.notes]
     if not context.notes:
         lines.append("- (no notes yet)")
     return "\n".join(lines)
+
+
+def _attendance_lines(context: TraineeContext) -> list[str]:
+    """The rate, and the template sessions missed most: one title per line, so that a title about
+    health is removed on its own by remove_sensitive_sentences, like any line (review, 2026-10-26)."""
+    a = context.attendance
+    if a is None:
+        return []
+    if a.rate is None:
+        return [f"Attendance, last {ATTENDANCE_DAYS} days: nothing recorded yet"]
+    lines = [
+        f"Attendance, last {ATTENDANCE_DAYS} days: {round(a.rate * 100)}% "
+        f"(present {a.present} of {a.counted} counted; {a.excused} excused, not counted)"
+    ]
+    missed = list(a.missed_in_template.items())[:3]
+    if missed:
+        lines.append("  Missed most:")
+        lines += [f"  - {title} ({n})" for title, n in missed]
+    return lines
 
 
 @dataclass(frozen=True)
@@ -353,6 +375,7 @@ class Coach:
         gate: SafetyGate | None = None,
         k: int = 4,
         prompt: Prompt | None = None,
+        today: Callable[[], date] = academy_today,
     ) -> None:
         self._uow = uow
         self._router = router
@@ -361,6 +384,7 @@ class Coach:
         self._gate = gate or SafetyGate(router)
         self._k = k
         self._prompt = prompt or load_prompt("coach_advice", PROMPT_VERSION)
+        self._today = today
 
     def ask(
         self, actor: StaffMember, question: str, trainee_id: int | None = None, *, use_record: bool = True
@@ -382,8 +406,14 @@ class Coach:
             context = None
             if trainee_id is not None:
                 context = CoachContextService(
-                    repos.trainees, repos.groups, repos.goals, repos.goal_updates, repos.notes
-                ).build(actor, trainee_id)
+                    repos.trainees,
+                    repos.groups,
+                    repos.goals,
+                    repos.goal_updates,
+                    repos.notes,
+                    repos.sessions,
+                    repos.attendance,
+                ).build(actor, trainee_id, today=self._today())
             roster = load_roster(repos.staff, repos.trainees)
             visible = {
                 t.key

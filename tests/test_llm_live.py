@@ -78,7 +78,7 @@ def _run_sample(sample):
     from pacer.services import MeetingService
 
     repos = empty_repos()
-    build_academy(repos)
+    build_academy(repos, schedule=False)
     spy = _Spy(claude_client("claude-haiku-5-5"))
     router = Router(models={**MODELS, "claude-haiku": ModelSpec(runs_locally=False, make_client=lambda: spy)})
     manager = repos.staff.get(1)
@@ -142,7 +142,7 @@ def test_claude_summarizes_the_sample_talk_safely():
     from pacer.domain import TalkProposalKind
 
     repos = empty_repos()
-    build_academy(repos)
+    build_academy(repos, schedule=False)
     spy = _Spy(claude_client("claude-haiku-5-5"))
     router = Router(models={**MODELS, "claude-haiku": ModelSpec(runs_locally=False, make_client=lambda: spy)})
     itai = repos.staff.get(MAYA.counselor_id)

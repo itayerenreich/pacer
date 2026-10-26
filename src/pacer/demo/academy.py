@@ -14,12 +14,15 @@ Design:
 import random
 from collections import Counter
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 from pacer.domain import (
+    ACADEMY_TIMEZONE,
     ApprovalKind,
     ApprovalRequest,
     ApprovalStatus,
+    AttendanceRecord,
+    AttendanceStatus,
     Cohort,
     Goal,
     GoalCategory,
@@ -28,11 +31,15 @@ from pacer.domain import (
     Group,
     NoteKind,
     PersonalFile,
+    ScheduledSession,
+    ScheduleSlot,
     StaffMember,
     StaffRole,
     Trainee,
     TraineeNote,
     TraineeStatus,
+    Weekday,
+    week_start,
 )
 from pacer.repositories import Repos
 
@@ -55,6 +62,9 @@ class Summary:
     goal_count: int = 0
     update_count: int = 0
     note_count: int = 0
+    slot_count: int = 0
+    session_count: int = 0
+    attendance_count: int = 0
     approvals: list[ApprovalRequest] = field(default_factory=list)
 
     @property
@@ -62,13 +72,21 @@ class Summary:
         return Counter(t.status for t in self.trainees)
 
 
-def build_academy(repos: Repos, *, seed: int = 2026, as_of: datetime | None = None) -> Summary:
-    """Create the whole academy through `repos`. The caller owns the unit of work."""
-    return _Builder(repos, random.Random(seed), as_of or datetime.now(UTC)).build()
+def build_academy(
+    repos: Repos, *, seed: int = 2026, as_of: datetime | None = None, schedule: bool = True
+) -> Summary:
+    """Create the whole academy through `repos`. The caller owns the unit of work.
+    schedule=False: without the weekly schedule and its ~1,700 attendance marks. For tests that do
+    not need them (most): building them before every test was half the fast suite's time."""
+    return _Builder(repos, random.Random(seed), as_of or datetime.now(UTC), seed, schedule=schedule).build()
 
 
 class _Builder:
-    def __init__(self, repos: Repos, rng: random.Random, as_of: datetime) -> None:
+    def __init__(
+        self, repos: Repos, rng: random.Random, as_of: datetime, seed: int = 2026, *, schedule: bool = True
+    ) -> None:
+        self.schedule = schedule
+        self.seed = seed  # the schedule gets its own Random(seed + 1): adding it changed nothing above
         if as_of < FIRST_DAY + timedelta(days=21):
             raise ValueError(f"as_of must be at least 3 weeks after {FIRST_DAY:%Y-%m-%d}")
         self.r = repos
@@ -117,6 +135,8 @@ class _Builder:
             self._add_goals(trainee, summary)
         self._add_approvals(summary, requests)
         self._add_notes(summary)
+        if self.schedule:
+            _Schedule(self.r, random.Random(self.seed + 1), self.now, cohort, summary).build()
         return summary
 
     # --- trainees ---------------------------------------------------------------------
@@ -339,3 +359,74 @@ class _Builder:
             for goal in self.r.goals.list_by_trainee(trainee.key):
                 if goal.status in (GoalStatus.NOT_STARTED, GoalStatus.IN_PROGRESS):
                     self.r.goals.update(goal.model_copy(update={"status": GoalStatus.DROPPED}))
+
+
+class _Schedule:
+    """The weekly template, the last ATTENDANCE_WEEKS weeks and this one published from it, and
+    attendance on every session before today. Its own Random, so the rest of the academy is unchanged."""
+
+    def __init__(self, repos: Repos, rng: random.Random, now: datetime, cohort: Cohort, summary: Summary) -> None:
+        self.r = repos
+        self.rng = rng
+        self.today = now.astimezone(ACADEMY_TIMEZONE).date()  # the academy's day, not UTC's
+        self.cohort = cohort
+        self.summary = summary
+
+    def build(self) -> None:
+        slots = []
+        for weekdays, start, end, title, per_group in content.SCHEDULE:
+            group_ids: list[int | None] = [g.key for g in self.summary.groups] if per_group else [None]
+            for group_id in group_ids:
+                for weekday in weekdays:
+                    slots.append(
+                        self.r.slots.add(
+                            ScheduleSlot(
+                                cohort_id=self.cohort.key,
+                                group_id=group_id,
+                                weekday=Weekday(weekday),
+                                start=time.fromisoformat(start),
+                                end=time.fromisoformat(end),
+                                title=title,
+                            )
+                        )
+                    )
+        self.summary.slot_count = len(slots)
+        this_week = week_start(self.today)
+        sessions = []
+        for weeks_back in range(content.ATTENDANCE_WEEKS, -1, -1):
+            sunday = this_week - timedelta(weeks=weeks_back)
+            for slot in slots:
+                day = slot.on_week(sunday)
+                if self.cohort.start_date <= day <= self.cohort.end_date:
+                    sessions.append(self.r.sessions.add(ScheduledSession.from_slot(slot, sunday)))
+        # One evening was cancelled (a real week has those): its session stays, without attendance.
+        evenings = [s for s in sessions if s.title == "ערב מחזור" and s.on < self.today]
+        if evenings:
+            sessions[sessions.index(evenings[-1])] = self.r.sessions.update(evenings[-1].cancel())
+        self.summary.session_count = len(sessions)
+        active = [t for t in self.summary.trainees if t.is_active]
+        for session in sessions:
+            if session.cancelled or session.on >= self.today:  # today's sessions are marked by the counselors
+                continue
+            for trainee in active:
+                if session.group_id is not None and trainee.group_id != session.group_id:
+                    continue
+                self.r.attendance.save(
+                    AttendanceRecord(
+                        session_id=session.key,
+                        trainee_id=trainee.key,
+                        status=self._status(trainee.full_name, session.title),
+                        recorded_by_id=trainee.primary_counselor_id,
+                        recorded_at=datetime.combine(session.on, session.end, ACADEMY_TIMEZONE),
+                    )
+                )
+                self.summary.attendance_count += 1
+
+    def _status(self, name: str, title: str) -> AttendanceStatus:
+        pattern = content.ABSENCE_BY_TRAINEE.get(name, {})
+        absent = pattern.get(title, pattern.get(None, content.ABSENCE_DEFAULT))
+        roll = self.rng.random()
+        if roll < content.EXCUSED:
+            return AttendanceStatus.EXCUSED
+        return AttendanceStatus.ABSENT if roll < content.EXCUSED + absent else AttendanceStatus.PRESENT
+

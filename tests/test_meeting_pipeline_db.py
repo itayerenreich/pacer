@@ -35,7 +35,7 @@ GOOD = json.dumps(WEEKLY_ANSWER, ensure_ascii=False)
 @pytest.fixture
 def academy(engine):
     with repositories(engine) as repos:
-        build_academy(repos)
+        build_academy(repos, schedule=False)
     return engine
 
 

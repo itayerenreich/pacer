@@ -25,11 +25,29 @@ from .errors import DomainRuleError, InvalidTransitionError
 from .goal import Goal, GoalUpdate
 from .library import CHUNK_MAX_LENGTH, Chunk, EvidenceLevel, KnowledgeSource, SourceKind, SourceLicense
 from .meeting import ProposedTask, StaffMeeting, Task
+from .schedule import (
+    ACADEMY_TIMEZONE,
+    AttendanceRecord,
+    AttendanceStatus,
+    ScheduledSession,
+    ScheduleSlot,
+    Weekday,
+    academy_today,
+    week_start,
+)
 from .staff import StaffMember
 from .talk import PersonalTalk, TalkProposal, TraineeNote
 from .trainee import PersonalFile, Trainee
 
 __all__ = [
+    "ACADEMY_TIMEZONE",
+    "academy_today",
+    "AttendanceRecord",
+    "AttendanceStatus",
+    "ScheduleSlot",
+    "ScheduledSession",
+    "Weekday",
+    "week_start",
     "CHUNK_MAX_LENGTH",
     "Chunk",
     "EvidenceLevel",

@@ -13,11 +13,13 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 
 from pacer.domain import (
     ApprovalKind,
     ApprovalRequest,
     ApprovalStatus,
+    AttendanceRecord,
     Chunk,
     Cohort,
     Goal,
@@ -28,6 +30,8 @@ from pacer.domain import (
     PersonalTalk,
     ProposalStatus,
     ProposedTask,
+    ScheduledSession,
+    ScheduleSlot,
     StaffMeeting,
     StaffMember,
     StaffRole,
@@ -40,30 +44,34 @@ from pacer.repositories import Repos, ScoredChunk
 
 
 class _Store[M: BaseModel]:
-    """add / get / update by id, with ids handed out like a database sequence."""
+    """add / get / update by id, with ids handed out like a database sequence.
+
+    Every model goes in and out as a DEEP copy: a list or dict field (Group.counselor_ids) changed by a
+    caller must never change the stored row. That is also why FakeUnitOfWork may snapshot rows with a
+    shallow copy of the dict (independent review, 2026-10-26)."""
 
     def __init__(self) -> None:
         self.rows: dict[int, M] = {}
 
     def add(self, item: M) -> M:
-        new_id = len(self.rows) + 1
-        saved = item.model_copy(update={"id": new_id})
-        self.rows[new_id] = saved.model_copy()
+        new_id = max(self.rows, default=0) + 1  # like a sequence: never reuses the id of a deleted row
+        saved = item.model_copy(update={"id": new_id}, deep=True)
+        self.rows[new_id] = saved.model_copy(deep=True)
         return saved
 
     def get(self, item_id: int) -> M | None:
         item = self.rows.get(item_id)
-        return None if item is None else item.model_copy()
+        return None if item is None else item.model_copy(deep=True)
 
     def update(self, item: M) -> M:
         if item.id not in self.rows:
             raise LookupError(f"{type(item).__name__} {item.id} does not exist")
-        self.rows[item.id] = item.model_copy()
+        self.rows[item.id] = item.model_copy(deep=True)
         return item
 
     def where(self, **fields) -> list[M]:
         return [
-            item.model_copy()
+            item.model_copy(deep=True)
             for item in self.rows.values()
             if all(getattr(item, name) == value for name, value in fields.items())
         ]
@@ -217,7 +225,17 @@ class FakeUnitOfWork:
     def __call__(self) -> Iterator[Repos]:
         stores = [getattr(self.repos, name) for name in Repos.__dataclass_fields__]
         kept = ("rows", "embeddings", "_next")  # what each fake store holds
-        snapshot = [{a: copy.deepcopy(getattr(store, a)) for a in kept if hasattr(store, a)} for store in stores]
+        # rows: a copy of the dict is enough. A store keeps its own deep copy of each model, hands out
+        # deep copies, and replaces a row on update, never changes it in place: so the old objects ARE
+        # the old state. (A deep copy of every row on every transaction made the suite 2.5x slower.)
+        snapshot = [
+            {
+                a: copy.copy(getattr(store, a)) if a == "rows" else copy.deepcopy(getattr(store, a))
+                for a in kept
+                if hasattr(store, a)
+            }
+            for store in stores
+        ]
         self.open += 1
         self.opened += 1
         try:
@@ -327,12 +345,74 @@ class FakeChunkRepo:
         return sorted(hits, key=lambda h: (-h.similarity, h.chunk.key))[:k]
 
 
+class FakeScheduleSlotRepo(_Store[ScheduleSlot]):
+    def list_by_cohort(self, cohort_id: int) -> list[ScheduleSlot]:
+        return sorted(self.where(cohort_id=cohort_id), key=lambda s: (s.weekday, s.start, s.id))
+
+
+class FakeScheduledSessionRepo(_Store[ScheduledSession]):
+    """Enforces uq_scheduled_sessions_slot_date on add AND update, as the database does."""
+
+    def _check_unique(self, item: ScheduledSession) -> None:
+        if item.slot_id is not None and any(
+            s.slot_id == item.slot_id and s.on == item.on and s.id != item.id for s in self.rows.values()
+        ):
+            raise IntegrityError("uq_scheduled_sessions_slot_date", None, Exception("duplicate"))
+
+    def add(self, item: ScheduledSession) -> ScheduledSession:
+        self._check_unique(item)
+        return super().add(item)
+
+    def update(self, item: ScheduledSession) -> ScheduledSession:
+        self._check_unique(item)
+        return super().update(item)
+
+    def list_between(self, cohort_id, first, last):
+        found = [s for s in self.where(cohort_id=cohort_id) if first <= s.on <= last]
+        return sorted(found, key=lambda s: (s.on, s.start, s.id))
+
+    def slot_dates(self, slot_ids, first, last):
+        ids = set(slot_ids)
+        return {(s.slot_id, s.on) for s in self.rows.values() if s.slot_id in ids and first <= s.on <= last}
+
+
+class FakeAttendanceRepo(_Store[AttendanceRecord]):
+    def __init__(self, sessions: FakeScheduledSessionRepo | None = None) -> None:
+        super().__init__()
+        self.sessions = sessions  # for the date range, as the real one joins
+
+    def save(self, record: AttendanceRecord) -> AttendanceRecord:
+        # A scan, not where(): where() copies every row, and the demo academy saves ~1,700 of them.
+        existing = next(
+            (r for r in self.rows.values() if r.session_id == record.session_id and r.trainee_id == record.trainee_id),
+            None,
+        )
+        if existing is not None:
+            saved = record.model_copy(update={"id": existing.id})
+            self.rows[existing.key] = saved.model_copy()
+            return saved
+        return self.add(record)
+
+    def list_by_session(self, session_id: int) -> list[AttendanceRecord]:
+        return [r.model_copy() for r in self.rows.values() if r.session_id == session_id]
+
+    def list_for_trainees(self, trainee_ids, first, last):
+        ids = set(trainee_ids)
+        assert self.sessions is not None, "FakeAttendanceRepo needs the sessions fake"
+        return [
+            r.model_copy()
+            for r in self.rows.values()
+            if r.trainee_id in ids and (s := self.sessions.rows.get(r.session_id)) and first <= s.on <= last
+        ]
+
+
 def empty_repos() -> Repos:
     """A fresh, empty fake for every repository."""
     talk_proposals = FakeTalkProposalRepo()
     chunks = FakeChunkRepo()
     sources = FakeKnowledgeSourceRepo(chunks)
     chunks.sources = sources
+    sessions = FakeScheduledSessionRepo()
     return Repos(
         staff=FakeStaffRepo(),
         cohorts=FakeCohortRepo(),
@@ -350,6 +430,9 @@ def empty_repos() -> Repos:
         notes=FakeTraineeNoteRepo(talk_proposals),
         sources=sources,
         chunks=chunks,
+        slots=FakeScheduleSlotRepo(),
+        sessions=sessions,
+        attendance=FakeAttendanceRepo(sessions),
     )
 
 
@@ -377,6 +460,9 @@ class World:
     notes: FakeTraineeNoteRepo = field(default_factory=FakeTraineeNoteRepo)
     chunks: FakeChunkRepo = field(default_factory=FakeChunkRepo)
     sources: FakeKnowledgeSourceRepo = field(default_factory=FakeKnowledgeSourceRepo)
+    slots: FakeScheduleSlotRepo = field(default_factory=FakeScheduleSlotRepo)
+    sessions: FakeScheduledSessionRepo = field(default_factory=FakeScheduledSessionRepo)
+    attendance: FakeAttendanceRepo = field(default_factory=FakeAttendanceRepo)
 
     @property
     def repos(self) -> Repos:
@@ -387,6 +473,7 @@ class World:
         self.talks = FakeTalkRepo(self.talk_proposals)
         self.sources = FakeKnowledgeSourceRepo(self.chunks)
         self.chunks.sources = self.sources
+        self.attendance = FakeAttendanceRepo(self.sessions)
         self.uow = FakeUnitOfWork(self.repos)
         self.manager = self.staff.add(StaffMember(full_name="Ronit Manager", role=StaffRole.MANAGER))
         self.noa = self.staff.add(StaffMember(full_name="Noa Levi", role=StaffRole.COUNSELOR))

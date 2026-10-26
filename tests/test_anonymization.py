@@ -325,7 +325,7 @@ def test_the_whole_demo_academy_leaves_no_name_behind():
     from pacer.demo import build_academy
 
     repos = fake_repos()
-    build_academy(repos, as_of=datetime(2026, 10, 14, tzinfo=UTC))
+    build_academy(repos, as_of=datetime(2026, 10, 14, tzinfo=UTC), schedule=False)
     anonymizer = Anonymizer(load_roster(repos.staff, repos.trainees))
 
     mentions = [f"ו{t.first_name} דיבר עם {t.full_name}" for t in repos.trainees.list_all()]

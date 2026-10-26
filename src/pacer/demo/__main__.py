@@ -49,7 +49,8 @@ def print_summary(summary: Summary) -> None:
     print(
         f"\nLoaded: {len(summary.trainees)} trainees, {summary.goal_count} goals, "
         f"{summary.update_count} progress updates, {summary.note_count} approved notes, "
-        f"{len(summary.approvals)} approval requests"
+        f"{len(summary.approvals)} approval requests, {summary.slot_count} weekly slots, "
+        f"{summary.session_count} sessions, {summary.attendance_count} attendance marks"
     )
     print("Trainee statuses:", ", ".join(f"{s}={n}" for s, n in sorted(summary.trainee_statuses.items())))
     print("\nTry the API at http://127.0.0.1:8000/docs with X-Staff-Id:")

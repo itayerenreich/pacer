@@ -44,7 +44,7 @@ def reply(**changes) -> str:
 @pytest.fixture
 def repos():
     repos = empty_repos()
-    build_academy(repos)
+    build_academy(repos, schedule=False)
     return repos
 
 

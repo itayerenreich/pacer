@@ -83,7 +83,7 @@ def fake_model(message: str) -> str:
 @pytest.fixture
 def repos():
     repos = empty_repos()
-    build_academy(repos)
+    build_academy(repos, schedule=False)
     return repos
 
 

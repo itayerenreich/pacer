@@ -17,7 +17,7 @@ COACH_SET = Path(__file__).parent.parent / "evals" / "coach-v1.json"
 @pytest.fixture(scope="module")
 def academy():
     repos = empty_repos()
-    build_academy(repos, as_of=datetime(2026, 10, 25, tzinfo=UTC))
+    build_academy(repos, as_of=datetime(2026, 10, 25, tzinfo=UTC), schedule=False)
     return repos
 
 

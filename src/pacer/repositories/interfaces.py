@@ -4,13 +4,16 @@ Services depend on these, not on the SQLAlchemy classes. Any object with the
 same methods fits, so service tests can pass a simple in-memory fake.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import date
 from typing import Protocol
 
 from pacer.domain import (
     ApprovalKind,
     ApprovalRequest,
     ApprovalStatus,
+    AttendanceRecord,
     Chunk,
     Cohort,
     Goal,
@@ -20,6 +23,8 @@ from pacer.domain import (
     PersonalFile,
     PersonalTalk,
     ProposedTask,
+    ScheduledSession,
+    ScheduleSlot,
     StaffMeeting,
     StaffMember,
     TalkProposal,
@@ -134,6 +139,27 @@ class TraineeNoteRepo(Protocol):
     def get(self, note_id: int) -> TraineeNote | None: ...
     def delete(self, note_id: int) -> None: ...
     def list_by_trainee(self, trainee_id: int) -> list[TraineeNote]: ...
+
+
+class ScheduleSlotRepo(Protocol):
+    def add(self, slot: ScheduleSlot) -> ScheduleSlot: ...
+    def get(self, slot_id: int) -> ScheduleSlot | None: ...
+    def update(self, slot: ScheduleSlot) -> ScheduleSlot: ...
+    def list_by_cohort(self, cohort_id: int) -> list[ScheduleSlot]: ...
+
+
+class ScheduledSessionRepo(Protocol):
+    def add(self, scheduled: ScheduledSession) -> ScheduledSession: ...
+    def get(self, session_id: int) -> ScheduledSession | None: ...
+    def update(self, scheduled: ScheduledSession) -> ScheduledSession: ...
+    def list_between(self, cohort_id: int, first: date, last: date) -> list[ScheduledSession]: ...
+    def slot_dates(self, slot_ids: Iterable[int], first: date, last: date) -> set[tuple[int, date]]: ...
+
+
+class AttendanceRepo(Protocol):
+    def save(self, record: AttendanceRecord) -> AttendanceRecord: ...
+    def list_by_session(self, session_id: int) -> list[AttendanceRecord]: ...
+    def list_for_trainees(self, trainee_ids: Iterable[int], first: date, last: date) -> list[AttendanceRecord]: ...
 
 
 class KnowledgeSourceRepo(Protocol):

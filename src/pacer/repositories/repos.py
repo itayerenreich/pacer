@@ -24,6 +24,7 @@ from .database import unit_of_work
 from .goal import GoalRepository, GoalUpdateRepository
 from .interfaces import (
     ApprovalRequestRepo,
+    AttendanceRepo,
     ChunkRepo,
     CohortRepo,
     GoalRepo,
@@ -34,6 +35,8 @@ from .interfaces import (
     PersonalFileRepo,
     PersonalTalkRepo,
     ProposedTaskRepo,
+    ScheduledSessionRepo,
+    ScheduleSlotRepo,
     StaffRepo,
     TalkProposalRepo,
     TaskRepo,
@@ -42,6 +45,7 @@ from .interfaces import (
 )
 from .library import ChunkRepository, KnowledgeSourceRepository
 from .meeting import MeetingRepository, ProposedTaskRepository, TaskRepository
+from .schedule import AttendanceRepository, ScheduledSessionRepository, ScheduleSlotRepository
 from .staff import StaffRepository
 from .talk import PersonalTalkRepository, TalkProposalRepository, TraineeNoteRepository
 from .trainee import PersonalFileRepository, TraineeRepository
@@ -67,6 +71,9 @@ class Repos:
     notes: TraineeNoteRepo
     sources: KnowledgeSourceRepo
     chunks: ChunkRepo
+    slots: ScheduleSlotRepo
+    sessions: ScheduledSessionRepo
+    attendance: AttendanceRepo
 
     @classmethod
     def over(cls, session: Session) -> "Repos":
@@ -87,6 +94,9 @@ class Repos:
             notes=TraineeNoteRepository(session),
             sources=KnowledgeSourceRepository(session),
             chunks=ChunkRepository(session),
+            slots=ScheduleSlotRepository(session),
+            sessions=ScheduledSessionRepository(session),
+            attendance=AttendanceRepository(session),
         )
 
 

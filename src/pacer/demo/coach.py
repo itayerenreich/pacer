@@ -20,7 +20,7 @@ from pacer.ai.coach import Coach, CoachOutcome, CoachResult, prepare_coach_messa
 from pacer.ai.embeddings import DEFAULT_EMBEDDING_MODEL, ollama_embedder
 from pacer.ai.routing import get_router
 from pacer.ai.safety import check_safety
-from pacer.domain import StaffMember
+from pacer.domain import StaffMember, academy_today
 from pacer.evaluation.coach_eval import advice_text
 from pacer.library.__main__ import as_document
 from pacer.library.chunking import DEFAULT_CHUNKING
@@ -48,8 +48,14 @@ def dry_run(question: str, asker: StaffMember, trainee_id: int | None) -> str:
         context = None
         if trainee_id is not None:
             context = CoachContextService(
-                repos.trainees, repos.groups, repos.goals, repos.goal_updates, repos.notes
-            ).build(asker, trainee_id)
+                repos.trainees,
+                repos.groups,
+                repos.goals,
+                repos.goal_updates,
+                repos.notes,
+                repos.sessions,
+                repos.attendance,
+            ).build(asker, trainee_id, today=academy_today())
         roster = load_roster(repos.staff, repos.trainees)
     found = check_safety(question)
     if found.is_risk:

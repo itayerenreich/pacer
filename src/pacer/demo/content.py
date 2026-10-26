@@ -212,3 +212,27 @@ TRAINEE_NOTES: dict[str, list[tuple[str, str, int]]] = {
         ("observation", "לא מדברת בשיחות הקבוצה, אבל כותבת הרבה ובעומק במשימות בכתב", 6),
     ],
 }
+
+# The weekly template (decision 2026-10-26). (weekdays, start, end, title, per group?)
+# Weekdays in Python's numbering: 6 Sunday, 0 Monday, 1 Tuesday, 2 Wednesday, 3 Thursday, 4 Friday.
+SUNDAY_TO_THURSDAY = (6, 0, 1, 2, 3)
+SCHEDULE: list[tuple[tuple[int, ...], str, str, str, bool]] = [
+    (SUNDAY_TO_THURSDAY, "06:45", "07:45", "ספורט בוקר", False),
+    (SUNDAY_TO_THURSDAY, "08:30", "10:00", "שיעור עיון", False),
+    ((6, 1, 3), "10:30", "12:30", "סדנה", False),
+    ((0,), "16:00", "17:30", "שיחת קבוצה", True),  # each group has its own
+    ((2,), "14:00", "17:00", "התנדבות בקהילה", False),
+    ((3,), "20:00", "21:30", "ערב מחזור", False),
+    ((4,), "08:00", "11:00", "תורנויות", False),
+]
+# How likely each trainee is to be absent (not excused), by default and in some slots. Patterns, not
+# noise: they match the approved notes (Ben is late after social evenings; Agam's fitness frustration).
+ABSENCE_DEFAULT = 0.05
+EXCUSED = 0.03
+ABSENCE_BY_TRAINEE: dict[str, dict[str | None, float]] = {
+    "בן שפירא": {"ספורט בוקר": 0.45},
+    "אגם לנדאו": {"ספורט בוקר": 0.25},
+    "נדב נחום": {None: 0.25},  # every slot: a trainee whose goals have not started either
+    "איתמר סויסה": {"שיעור עיון": 0.3},
+}
+ATTENDANCE_WEEKS = 3  # weeks of attendance before the demo's "now", plus the current week so far

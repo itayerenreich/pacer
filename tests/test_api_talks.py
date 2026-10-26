@@ -32,7 +32,7 @@ TALK = {"held_on": MAYA.held_on.isoformat(), "notes": MAYA.notes}
 @pytest.fixture
 def repos():
     repos = empty_repos()
-    build_academy(repos)
+    build_academy(repos, schedule=False)
     return repos
 
 

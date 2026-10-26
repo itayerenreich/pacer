@@ -25,7 +25,7 @@ TALK_SET = Path("evals/talks-v1.json")
 @pytest.fixture(scope="module")
 def repos():
     repos = empty_repos()
-    build_academy(repos)
+    build_academy(repos, schedule=False)
     return repos
 
 

@@ -28,6 +28,8 @@ manager track trainees, the personal goals they set together, and progress over 
 Sensitive actions, like opening a trainee's personal file or sending a trainee home,
 go through manager approval.
 
+A weekly schedule with attendance per session shows each trainee's attendance rate.
+
 On top of this data layer sit AI features: the text of a staff meeting becomes a
 summary and proposed tasks, and a counselor's notes from a personal talk become a
 summary, goal progress updates and notes worth remembering. A **counselor coach** gives practical
@@ -198,6 +200,26 @@ question ─► permissions (404 if this counselor may not see him)
   (the demo library is five classical texts), so every step is marked general advice. The first run also
   found a real failure: Haiku sometimes added a stray key to a valid answer, which made it a 502 for 1
   question in 9; the coach now drops keys it does not know, and a test holds it.
+
+## The weekly schedule and attendance
+
+The manager defines a typical week once (a **template**: "Sunday 06:45 morning sport"), and publishes each
+week from it. One week can change (a trip, a cancelled evening) without touching the template, and a
+change to the template never rewrites a week that already happened: template and instance are two tables.
+Counselors mark each session for the trainees of their groups: **present, absent, or excused**.
+
+- **The rate is present / (present + absent).** Excused does not count against a trainee; a session nobody
+  marked is shown as unmarked and not counted (a counselor who forgot must not lower a trainee's rate); a
+  cancelled session is left out; "nothing counted yet" is no rate, not 0%.
+- **Who needs attention comes first:** `GET /attendance` lists the trainees you may see, the lowest rate
+  first, each with the sessions they miss most (in the demo: Ben, whose note says he is late after social
+  evenings, missed morning sport 8 of his 9 absences).
+- **No reason text, on purpose:** "he was at the doctor" is health data. There is no field for it, and the
+  API rejects one.
+- **The coach reads it:** the last 30 days' rate and the sessions missed most go into the trainee's record,
+  so advice about a trainee who is late is advice about mornings.
+- **The database enforces it too:** one session per template slot and date, one mark per trainee and
+  session (marking again replaces it), and the academy's "today" is Israel's, not the server's UTC.
 
 ## Stack
 
