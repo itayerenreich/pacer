@@ -40,7 +40,7 @@ lets later stages map a model's answer ("owner: [STAFF_2]") straight back to a s
 
 import re
 from collections import defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from types import MappingProxyType
@@ -55,7 +55,12 @@ _NOT_LETTER_BEFORE = rf"(?<!{_LETTER})"
 _NOT_LETTER_AFTER = rf"(?!{_LETTER})"
 # Invisible characters that split a name without changing how it looks: niqqud and cantillation,
 # zero-width characters, the soft hyphen, and direction marks. Removed from the text first.
-_INVISIBLE = re.compile("[\u0591-\u05c7\u00ad\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]")
+# NOT the Hebrew punctuation that sits in the same Unicode block: the maqaf (U+05BE) and paseq, sof
+# pasuq and nun hafukha (U+05C0, U+05C3, U+05C6) separate WORDS. Removed, "עם־נדב" became one word,
+# "עםנדב", and the name went to the cloud (found by an independent review, 2026-10-25).
+_INVISIBLE = re.compile(
+    "[\u0591-\u05bd\u05bf\u05c1\u05c2\u05c4\u05c5\u05c7\u00ad\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]"
+)
 # Separators inside a name: spaces and every kind of hyphen and dash. "בר-און", "בר און", "בר־און",
 # "בר‑און" and even "בראון" are the same last name.
 _SEPARATORS = " -\u05be\u2010\u2011\u2012\u2013\u2014\u2212"
@@ -316,14 +321,16 @@ def _set_aside(text: str, spans: Sequence[tuple[int, int]]) -> tuple[str, list[s
     return "".join(pieces) + text[last:], marked
 
 
-def deanonymize(text: str, source: AnonymizedText) -> str:
+def deanonymize(text: str, source: AnonymizedText, name_for: Callable[[Person], str] | None = None) -> str:
     """Tokens back to names, on this computer. Unknown tokens (invented by a model) stay as they
-    are, so a later validation step can notice them instead of silently guessing."""
+    are, so a later validation step can notice them instead of silently guessing.
+    name_for: how to write a person back (default: the full name). The coach uses it so that a
+    trainee the asker may not see comes back only as the asker wrote them, never completed."""
 
     def restore(match: re.Match) -> str:
         token = match.group(0)
         if person := source.people.get(token):
-            return person.full_name
+            return person.full_name if name_for is None else name_for(person)
         return source.unresolved.get(token, token)
 
     return _TOKEN.sub(restore, text)

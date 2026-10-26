@@ -28,6 +28,7 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
 from pacer.ai.answer import LibraryAnswerer
+from pacer.ai.coach import Coach
 from pacer.ai.embeddings import DEFAULT_EMBEDDING_MODEL, Embedder, ollama_embedder
 from pacer.ai.meeting_pipeline import MeetingPipeline
 from pacer.ai.routing import Router, get_router
@@ -303,3 +304,14 @@ def get_library_answerer(
 
 
 LibraryAnswererDep = Annotated[LibraryAnswerer, Depends(get_library_answerer)]
+
+
+def get_coach(
+    uow: UnitOfWorkDep,
+    router: Annotated[Router, Depends(get_ai_router)],
+    embedder: Annotated[Embedder, Depends(get_embedder)],
+) -> Coach:
+    return Coach(uow, router, embedder, DEFAULT_CHUNKING)
+
+
+CoachDep = Annotated[Coach, Depends(get_coach)]

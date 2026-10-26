@@ -28,7 +28,6 @@ that no phrase matched; the counselor's judgment and the academy's procedure alw
 
 import re
 import unicodedata
-from collections.abc import Iterable
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -189,9 +188,16 @@ _PATTERNS: dict[RiskKind, list[str]] = {
 
 # Niqqud and invisible characters (bidi marks, zero-width spaces) would split a word in two:
 # "הִתְאַבֵּד" and "הת<zero-width>אבד" must be found like "התאבד". The maqaf (U+05BE) sits inside the
-# niqqud range but joins two WORDS, so it is left out here and turned into a space below.
-_INVISIBLE = re.compile("[\u0591-\u05bd\u05bf-\u05c7\u00ad\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]")
-_SPACE = re.compile(r"[-\u05be\u2010-\u2015\u2212,;:!?.()\[\]\"'/\\\u05f4\u05f3\u201c\u201d\u2018\u2019`\u00b4\u2026]+")
+# niqqud range but joins two WORDS, so it is left out here and turned into a space below; so are paseq,
+# sof pasuq and nun hafukha (U+05C0, U+05C3, U+05C6).
+_INVISIBLE = re.compile(
+    "[\u0591-\u05bd\u05bf\u05c1\u05c2\u05c4\u05c5\u05c7"
+    "\u00ad\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]"
+)
+_SPACE = re.compile(
+    r"[-\u05be\u05c0\u05c3\u05c6\u2010-\u2015\u2212,;:!?.()\[\]\"'/\\"
+    r"\u05f4\u05f3\u201c\u201d\u2018\u2019`\u00b4\u2026]+"
+)
 _COMPILED = {kind: re.compile("|".join(patterns)) for kind, patterns in _PATTERNS.items()}
 
 
@@ -219,6 +225,9 @@ def check_safety(*texts: str) -> SafetyCheck:
 
 
 # --- the referral --------------------------------------------------------------------------------
+# One procedure for every exceptional incident (אירוע חריג), whatever the kind (decision 2026-10-25,
+# Itay): a counselor in a hard moment needs one clear list, not a classification. The kinds above stay
+# inside the code: they make the patterns readable and the evaluation measurable, and are never shown.
 
 
 @dataclass(frozen=True)
@@ -229,7 +238,6 @@ class ReferralStep:
 
 @dataclass(frozen=True)
 class Referral:
-    kinds: tuple[RiskKind, ...]
     message: str
     steps: tuple[ReferralStep, ...]
 
@@ -237,65 +245,43 @@ class Referral:
 # A GENERAL default, written for the demo academy. An academy's own procedure replaces it: its
 # contacts, its order, its words. Numbers checked on 2026-10-25 (ער"ן; the national rape crisis lines,
 # kolzchut.org.il). Keep every step short: this is read by a counselor in a hard moment.
-_FIRST_STEPS = (
-    ReferralStep(
-        "אם יש סכנה מיידית לחיים: לא להשאיר את החניך לבד, ולהתקשר מיד למד\"א או למשטרה.",
-        "מד\"א 101 · משטרה 100",
+#
+# The reporting step: for a minor the law decides, not the manager. Every adult must report an offense
+# against a minor by the one responsible for them or by a family member, and education staff more
+# strictly; serious harm, abuse or a sexual offense inside an educational setting must be reported
+# whoever committed it (kolzchut.org.il, checked 2026-10-25). Most trainees are 18, some are not, so the
+# step says both. Not legal advice: the academy checks it.
+REFERRAL = Referral(
+    message=(
+        "מה שתיארת עלול להיות אירוע חריג. במצבים כאלה Pacer לא נותן ייעוץ, כי הם דורשים אדם ולא מערכת. "
+        "אלה הצעדים לפי הנוהל:"
     ),
-    ReferralStep("לעדכן עכשיו את מנהל המכינה. זה לא מצב שמטפלים בו לבד.", "מנהל המכינה"),
-    ReferralStep(
-        "לכתוב בקצרה מה נאמר ומתי, במילים של מי שאמר, ולמסור למנהל. לא לחקור, ולא להבטיח לשמור בסוד."
+    steps=(
+        ReferralStep(
+            "אם יש סכנה מיידית: לא להשאיר את החניך לבד, להרחיק את מי שבסכנה ממקור הסכנה, ולהתקשר מיד.",
+            "מד\"א 101 · משטרה 100",
+        ),
+        ReferralStep("לעדכן עכשיו את מנהל המכינה. זה לא מצב שמטפלים בו לבד.", "מנהל המכינה"),
+        ReferralStep("להרחיק אמצעים זמינים לפגיעה (תרופות, חפצים חדים, נשק), בלי להשאיר את החניך לבד."),
+        ReferralStep(
+            "לכתוב בקצרה מה נאמר ומתי, במילים של מי שאמר, ולמסור למנהל. לא לחקור, ולא להבטיח לשמור בסוד."
+        ),
+        ReferralStep(
+            "חניך מתחת לגיל 18: יש חובת דיווח בחוק, ולאנשי חינוך היא מחמירה. מדווחים לרווחה (המחלקה לשירותים "
+            "חברתיים) או למשטרה. לעדכן את המנהל ולוודא שהדיווח נעשה. מעל 18: המנהל מחליט עם גורם מקצועי.",
+            "רווחה · משטרה 100",
+        ),
+        ReferralStep(
+            "קווי סיוע, 24 שעות: עזרה ראשונה נפשית (גם בשבילך כמדריך), ופגיעה מינית (אנונימי).",
+            "ער\"ן 1201 · 1202 (נשים) · 1203 (גברים)",
+        ),
     ),
 )
-# For a minor the law decides, not the manager: every adult must report an offense against a minor by
-# the one responsible for them or by a family member, and education staff more strictly; an offense
-# inside the academy must be reported whoever committed it (kolzchut.org.il, checked 2026-10-25).
-# Most trainees are 18, some are not, so the step says both. Not legal advice: the academy checks it.
-_REPORTING = ReferralStep(
-    "חניך מתחת לגיל 18: יש חובת דיווח בחוק, ולאנשי חינוך היא מחמירה. מדווחים לרווחה (המחלקה לשירותים "
-    "חברתיים) או למשטרה. לעדכן את המנהל ולוודא שהדיווח נעשה. מעל 18: המנהל מחליט עם גורם מקצועי.",
-    "רווחה · משטרה 100",
-)
-_STEPS_BY_KIND: dict[RiskKind, tuple[ReferralStep, ...]] = {
-    RiskKind.SELF_HARM: (
-        ReferralStep(
-            "לשאול את החניך ישירות ובעדינות אם הוא חושב לפגוע בעצמו. שאלה ישירה לא מעודדת פגיעה.",
-        ),
-        ReferralStep("להרחיק אמצעים זמינים (תרופות, חפצים חדים, נשק), בלי להשאיר את החניך לבד."),
-        ReferralStep("עזרה ראשונה נפשית, 24 שעות, גם בשבילך כמדריך.", "ער\"ן 1201"),
-    ),
-    RiskKind.VIOLENCE: (
-        ReferralStep("להרחיק את הצדדים זה מזה ולוודא שאף אחד לא בסכנה, לפני כל שיחה."),
-    ),
-    RiskKind.ABUSE: (
-        _REPORTING,
-    ),
-    RiskKind.SEXUAL_HARM: (
-        ReferralStep(
-            "קו סיוע לנפגעות ולנפגעי תקיפה מינית, 24 שעות, אנונימי.",
-            "1202 (נשים) · 1203 (גברים)",
-        ),
-        _REPORTING,
-    ),
-}
 
 
 def referral_for(check: SafetyCheck) -> Referral:
-    """The fixed answer to a risk situation: the general steps, then the steps for each kind found,
-    each step once. No model is involved, so this answer is the same every time and never fails."""
+    """The fixed answer to an exceptional incident: the same procedure every time, whatever was found.
+    No model is involved, so it never fails and never varies."""
     if not check.is_risk:
         raise ValueError("referral_for() needs a check that found a risk")
-    kinds = tuple(kind for kind in RiskKind if kind in check.kinds)  # a fixed order, not set order
-    labels = ", ".join(kind.label for kind in kinds)
-    message = (
-        f"מה שתיארת עלול להיות מצב סיכון ({labels}). במצבים כאלה Pacer לא נותן ייעוץ, "
-        "כי הם דורשים אדם ולא מערכת. אלה הצעדים לפי הנוהל:"
-    )
-    return Referral(kinds=kinds, message=message, steps=_unique(_FIRST_STEPS, *(_STEPS_BY_KIND[k] for k in kinds)))
-
-
-def _unique(*groups: Iterable[ReferralStep]) -> tuple[ReferralStep, ...]:
-    steps: dict[ReferralStep, None] = {}
-    for group in groups:
-        steps.update(dict.fromkeys(group))
-    return tuple(steps)
+    return REFERRAL

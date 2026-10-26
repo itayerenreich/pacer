@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from pacer.ai.safety import Referral, RiskKind, SafetyCheck, check_safety, referral_for
+from pacer.ai.safety import REFERRAL, RiskKind, SafetyCheck, check_safety, referral_for
 from pacer.evaluation.safety_set import evaluate, load_safety_set
 
 SAFETY_SET = Path(__file__).parent.parent / "evals" / "safety-v1.json"
@@ -112,56 +112,38 @@ def test_several_kinds_at_once():
     assert check_safety("חניכה סיפרה על אלימות במשפחה ועל פגיעה מינית").kinds == {VIOLENCE, ABUSE, SEXUAL}
 
 
-# --- the referral --------------------------------------------------------------------------------
+# --- the referral: one procedure for every exceptional incident -------------------------------
+
+
+@pytest.mark.parametrize("kinds", [{SELF_HARM}, {VIOLENCE}, {ABUSE}, {SEXUAL}, {VIOLENCE, ABUSE, SEXUAL}])
+def test_every_incident_gets_the_same_referral(kinds):
+    """No classification for the counselor (decision 2026-10-25): what was found does not change what
+    they read, so a wrong kind can never drop a step (the held-out run had three of those)."""
+    assert referral_for(SafetyCheck(frozenset(kinds))) is REFERRAL
 
 
 def test_the_referral_starts_with_immediate_danger_and_the_manager():
-    referral = referral_for(SafetyCheck(frozenset({VIOLENCE})))
-    assert "101" in (referral.steps[0].contact or "")
-    assert referral.steps[1].contact == "מנהל המכינה"
+    assert "101" in (REFERRAL.steps[0].contact or "")
+    assert REFERRAL.steps[1].contact == "מנהל המכינה"
 
 
-def test_each_kind_adds_its_own_steps():
-    contacts = [s.contact for s in referral_for(SafetyCheck(frozenset({SELF_HARM}))).steps]
-    assert any(c and "1201" in c for c in contacts)
-    contacts = [s.contact for s in referral_for(SafetyCheck(frozenset({SEXUAL}))).steps]
-    assert any(c and "1202" in c and "1203" in c for c in contacts)
+def test_the_referral_has_every_step_that_matters():
+    actions = " ".join(step.action for step in REFERRAL.steps)
+    contacts = " ".join(step.contact or "" for step in REFERRAL.steps)
+    assert "מתחת לגיל 18" in actions and "חובת דיווח" in actions  # the law for minors
+    assert "להרחיק אמצעים" in actions
+    assert "לא להבטיח לשמור בסוד" in actions
+    assert all(number in contacts for number in ("101", "100", "1201", "1202", "1203"))
 
 
-def test_a_step_shared_by_two_kinds_appears_once():
-    referral = referral_for(SafetyCheck(frozenset({ABUSE, SEXUAL})))
-    assert len(referral.steps) == len(set(referral.steps))
-
-
-def test_the_referral_is_the_same_every_time_whatever_the_set_order():
-    a = referral_for(SafetyCheck(frozenset({SEXUAL, SELF_HARM})))
-    b = referral_for(SafetyCheck(frozenset({SELF_HARM, SEXUAL})))
-    assert a == b
-    assert a.kinds == (SELF_HARM, SEXUAL)  # the order of RiskKind, not of the set
-
-
-def test_the_message_names_the_kinds_in_hebrew():
-    referral: Referral = referral_for(SafetyCheck(frozenset({SELF_HARM})))
-    assert "פגיעה עצמית" in referral.message
-    assert "self_harm" not in referral.message
+def test_the_message_calls_it_an_exceptional_incident_and_names_no_kind():
+    assert "אירוע חריג" in REFERRAL.message
+    assert not any(kind.label in REFERRAL.message or kind.value in REFERRAL.message for kind in RiskKind)
 
 
 def test_no_referral_without_a_risk():
     with pytest.raises(ValueError):
         referral_for(SafetyCheck(frozenset()))
-
-
-def test_abuse_and_sexual_harm_carry_the_reporting_duty_for_minors():
-    for kind in (ABUSE, SEXUAL):
-        actions = " ".join(s.action for s in referral_for(SafetyCheck(frozenset({kind}))).steps)
-        assert "מתחת לגיל 18" in actions and "חובת דיווח" in actions
-    actions = " ".join(s.action for s in referral_for(SafetyCheck(frozenset({VIOLENCE}))).steps)
-    assert "חובת דיווח" not in actions  # a fight between trainees is not, by itself, a report
-
-
-def test_self_harm_says_to_remove_the_means():
-    actions = " ".join(s.action for s in referral_for(SafetyCheck(frozenset({SELF_HARM}))).steps)
-    assert "להרחיק אמצעים" in actions
 
 
 def test_the_held_out_set_is_measured_not_required():
@@ -172,3 +154,7 @@ def test_the_held_out_set_is_measured_not_required():
     assert result.total == 60
     assert result.found >= 30
     assert len(result.false_alarms) <= 4
+
+
+def test_paseq_between_words_is_a_space_too():
+    assert check_safety("רוצה׀למות").kinds == {SELF_HARM}

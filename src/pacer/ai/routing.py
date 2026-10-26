@@ -48,6 +48,7 @@ class AITask(StrEnum):
     ANSWER_FROM_LIBRARY = "answer_from_library"  # stage 4: a staff question, answered from the library
     ANSWER_WITHOUT_LIBRARY = "answer_without_library"  # stage 4 evaluation: the same question, no passages
     JUDGE = "judge"  # stage 4 evaluation: grades an answer or a talk summary against the answer key
+    COACH_ADVICE = "coach_advice"  # stage 5: the counselor coach's advice about a trainee
     SCREEN_RISK = "screen_risk"  # stage 5: is a counselor's question a risk situation? (after the phrase list)
 
 
@@ -94,6 +95,8 @@ ROUTES: Mapping[AITask, Route] = MappingProxyType(
         AITask.JUDGE: Route("claude-sonnet", Sensitivity.ANONYMIZED, max_tokens=3000),
         # The safety screen sees exactly what the coach would send next: anonymized, health sentences removed.
         AITask.SCREEN_RISK: Route("claude-haiku", Sensitivity.ANONYMIZED, max_tokens=400),
+        # The coach: the question and the trainee's approved record, anonymized and without health sentences.
+        AITask.COACH_ADVICE: Route("claude-haiku", Sensitivity.ANONYMIZED, max_tokens=3000),
     }
 )
 

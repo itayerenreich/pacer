@@ -9,7 +9,8 @@ from pacer.ai import LLMUnavailableError
 from pacer.ai.anonymization import Anonymizer, Person, PersonKind, Roster
 from pacer.ai.risk_screen import FoundBy, SafetyGate, ScreenAnswer
 from pacer.ai.routing import ROUTES, AITask, Sensitivity
-from pacer.ai.safety import RiskKind
+from pacer.ai.safety import REFERRAL, RiskKind
+from pacer.ai.sensitive import HEALTH_MASK
 from pacer.ai.structured import StructuredOutputError
 
 YOAV = Person(PersonKind.TRAINEE, 7, "יואב", "לוי")
@@ -39,7 +40,7 @@ def test_the_model_catches_a_scene_the_phrases_miss():
     gate, cloud = gate_with(screen(True, ["self_harm"], "stood somewhere high at night"))
     decision = gate.assess("חבר שלו סיפר שיואב עמד על הגג בלילה וחשב על דברים", ANONYMIZER)
     assert decision.is_risk and decision.found_by is FoundBy.MODEL
-    assert decision.referral is not None and decision.referral.kinds == (RiskKind.SELF_HARM,)
+    assert decision.referral is REFERRAL and decision.kinds == {RiskKind.SELF_HARM}
     assert len(cloud.calls) == 1
 
 
@@ -49,11 +50,10 @@ def test_a_no_from_the_model_gives_advice_its_way():
     assert not decision.is_risk and decision.referral is None
 
 
-def test_the_model_answer_gets_every_step_of_its_kinds():
+def test_the_model_answer_gets_the_same_procedure_as_the_phrases():
     gate, _ = gate_with(screen(True, ["abuse", "sexual_harm"]))
     decision = gate.assess("משהו קרה לו בבית בשבת והוא לא מוכן לספר", ANONYMIZER)
-    actions = " ".join(step.action for step in decision.referral.steps)  # type: ignore[union-attr]
-    assert "חובת דיווח" in actions
+    assert decision.referral is REFERRAL
 
 
 # --- what reaches the model ----------------------------------------------------------------------
@@ -67,16 +67,25 @@ def test_names_never_reach_the_model():
     assert "[TRAINEE_7]" in sent and "[STAFF_2]" in sent
 
 
-def test_health_sentences_never_reach_the_model():
+def test_health_words_never_reach_the_model_but_the_rest_of_their_sentence_does():
+    """The screen masks health WORDS (not sentences): the scene must still be screened."""
     gate, cloud = gate_with(screen(False))
-    gate.assess("יואב התחיל לקחת ריטלין החודש. הוא שקט בשיחות הקבוצה.", ANONYMIZER)
+    gate.assess("הפסיכולוג סיפר שיואב עמד על הגג בלילה. הוא שקט בשיחות הקבוצה.", ANONYMIZER)
     sent = cloud.calls[0].user_message
-    assert "ריטלין" not in sent and "שקט בשיחות" in sent
+    assert "פסיכולוג" not in sent and "יואב" not in sent
+    assert "עמד על הגג בלילה" in sent and HEALTH_MASK in sent
 
 
-def test_nothing_left_after_health_sentences_means_no_call():
+def test_a_risk_scene_in_a_sentence_about_health_is_screened():
+    """The review's case: the old gate dropped the whole sentence, and the counselor got advice."""
+    gate, _ = gate_with(screen(True, ["self_harm"]))
+    decision = gate.assess("הפסיכולוג סיפר שיואב עמד על הגג בלילה. איך לעזור לו להשתתף בקבוצה?", ANONYMIZER)
+    assert decision.found_by is FoundBy.MODEL
+
+
+def test_nothing_but_health_words_means_no_call():
     gate, cloud = gate_with(screen(True, ["self_harm"]))
-    decision = gate.assess("הוא אצל פסיכולוג מאז החורף.", ANONYMIZER)
+    decision = gate.assess("ריטלין.", ANONYMIZER)
     assert cloud.calls == [] and not decision.is_risk
 
 

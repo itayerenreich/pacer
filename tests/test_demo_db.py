@@ -8,7 +8,7 @@ from pacer.api.app import create_app
 from pacer.api.dependencies import get_db_engine
 from pacer.demo.__main__ import load
 from pacer.repositories import unit_of_work
-from pacer.repositories.tables import GoalUpdateRow, StaffMemberRow, TraineeRow
+from pacer.repositories.tables import GoalUpdateRow, StaffMemberRow, TraineeNoteRow, TraineeRow
 
 pytestmark = pytest.mark.integration
 
@@ -24,6 +24,7 @@ def test_load_fills_the_database(engine):
     assert count(engine, TraineeRow) == 35
     assert count(engine, StaffMemberRow) == 5
     assert count(engine, GoalUpdateRow) == summary.update_count > 0
+    assert count(engine, TraineeNoteRow) == summary.note_count > 0
 
 
 def test_refuses_to_load_twice_without_reset(engine):

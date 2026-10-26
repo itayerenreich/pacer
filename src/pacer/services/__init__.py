@@ -16,6 +16,7 @@ Usage (the API will do this per request):
 """
 
 from .approvals import ApprovalService
+from .coach_context import CoachContextService, GoalContext, TraineeContext
 from .errors import NotFoundError, PermissionDeniedError, RuleViolationError, ServiceError
 from .goals import GoalService
 from .meetings import MeetingService, ProposalEdits, TaskDraft, TaskService
@@ -24,6 +25,8 @@ from .trainees import TraineeService
 
 __all__ = [
     "ApprovalService",
+    "CoachContextService",
+    "GoalContext",
     "GoalService",
     "MeetingService",
     "NotFoundError",
@@ -36,5 +39,6 @@ __all__ = [
     "TalkService",
     "TaskDraft",
     "TaskService",
+    "TraineeContext",
     "TraineeService",
 ]

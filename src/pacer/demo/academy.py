@@ -26,10 +26,12 @@ from pacer.domain import (
     GoalStatus,
     GoalUpdate,
     Group,
+    NoteKind,
     PersonalFile,
     StaffMember,
     StaffRole,
     Trainee,
+    TraineeNote,
     TraineeStatus,
 )
 from pacer.repositories import Repos
@@ -52,6 +54,7 @@ class Summary:
     trainees: list[Trainee]
     goal_count: int = 0
     update_count: int = 0
+    note_count: int = 0
     approvals: list[ApprovalRequest] = field(default_factory=list)
 
     @property
@@ -113,6 +116,7 @@ class _Builder:
         for trainee in summary.trainees:
             self._add_goals(trainee, summary)
         self._add_approvals(summary, requests)
+        self._add_notes(summary)
         return summary
 
     # --- trainees ---------------------------------------------------------------------
@@ -205,6 +209,22 @@ class _Builder:
         if progress == 100:
             return self.rng.choice(content.NOTES_DONE)
         return self.rng.choice(content.NOTES_EARLY if progress < 40 else content.NOTES_MIDDLE)
+
+    def _add_notes(self, summary: Summary) -> None:
+        """Approved notes for the few trainees in content.TRAINEE_NOTES (no randomness: the rest of the
+        academy stays exactly as it was), written by the trainee's primary counselor."""
+        for trainee in summary.trainees:
+            for kind, text, days_ago in content.TRAINEE_NOTES.get(trainee.full_name, []):
+                self.r.notes.add(
+                    TraineeNote(
+                        trainee_id=trainee.id,
+                        kind=NoteKind(kind),
+                        text=text,
+                        author_id=trainee.primary_counselor_id,
+                        created_at=self.now - timedelta(days=days_ago),
+                    )
+                )
+                summary.note_count += 1
 
     # --- approvals and the statuses they changed ----------------------------------------
 

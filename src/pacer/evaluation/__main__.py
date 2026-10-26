@@ -7,6 +7,8 @@ uv run python -m pacer.evaluation run --model claude-sonnet --only talks --limit
 uv run python -m pacer.evaluation compare data/eval-*.json --out data/models.md  # runs, side by side
 uv run python -m pacer.evaluation safety                                   # the phrase list alone: free
 uv run python -m pacer.evaluation safety --send --out data/safety.md       # with the model screen: about $0.05
+uv run python -m pacer.evaluation coach --out data/coach-haiku.md           # the counselor coach: about $0.30
+uv run python -m pacer.evaluation coach --model claude-sonnet --out data/coach-sonnet.md
 
 check and masking need no model. run needs ANTHROPIC_API_KEY, and Ollama for the embeddings (bge-m3).
 All read the academy from the database in .env (the demo academy: python -m pacer.demo). run writes the
@@ -20,9 +22,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from pacer.ai import LLMError
-from pacer.ai.anonymization import Anonymizer, load_roster
+from pacer.ai.anonymization import AnonymizationError, Anonymizer, load_roster
 from pacer.ai.answer import PROMPT_VERSION as ANSWER_PROMPT_VERSION
 from pacer.ai.answer import LibraryAnswerer
+from pacer.ai.coach import PROMPT_VERSION as COACH_PROMPT_VERSION
+from pacer.ai.coach import Coach
 from pacer.ai.embeddings import DEFAULT_EMBEDDING_MODEL, ollama_embedder
 from pacer.ai.risk_screen import SafetyGate
 from pacer.ai.routing import MODELS, AITask
@@ -33,7 +37,9 @@ from pacer.library.chunking import DEFAULT_CHUNKING
 from pacer.library.manifest import load_manifest
 from pacer.logging_config import configure_logging, use_utf8_console
 from pacer.repositories import get_engine, repositories
+from pacer.services import ServiceError
 
+from .coach_eval import CoachCaseResult, coach_summary, load_coach_set, render_coach, resolve_cases, run_coach_case
 from .library_set import load_library_set, unknown_sources
 from .masking import MentionResult, Outcome, measure, summary
 from .report import render
@@ -51,6 +57,7 @@ from .talk_set import CaseError, load_talk_set, resolve
 
 LIBRARY_SET = Path("evals/library-v1.json")
 TALK_SET = Path("evals/talks-v1.json")
+COACH_SET = Path("evals/coach-v1.json")
 SAFETY_SETS = {"heldout": Path("evals/safety-heldout-v1.json"), "main": Path("evals/safety-v1.json")}
 MANIFESTS = [Path("library/classics.json")]
 
@@ -89,6 +96,11 @@ def check() -> str:
             except CaseError as error:
                 errors.append(str(error))
     lines += [f"  ✗ {e}" for e in errors] or ["  ✓ every case fits the academy in the database"]
+    coach = load_coach_set(COACH_SET)
+    lines.append(f"{coach.ref}: {len(coach.cases)} cases")
+    with _uow()() as repos:
+        _, problems = resolve_cases(coach, repos)
+    lines += [f"  ✗ {p}" for p in problems] or ["  ✓ every case fits the academy in the database"]
     return "\n".join(lines)
 
 
@@ -224,6 +236,15 @@ COMPARED: list[tuple[str, str, str, str]] = [
     ("שיחות: הערות צפויות שנמצאו", "talks.masked", "notes_found", "pct"),
     ("שיחות: פרט רפואי בהצעה", "talks.masked", "forbidden_found", "num"),
     ("שיחות: שניות לשיחה", "talks.masked", "seconds_per_talk", "num"),
+    ("מלווה: תוצאה נכונה", "coach", "outcome_ok", "pct"),
+    ("מלווה: סעיפי בדיקה", "coach", "checklist", "pct"),
+    ("מלווה: סעיפים אישיים, עם הרשומה", "coach", "checklist_personal", "pct"),
+    ("מלווה: אותם סעיפים, בלי הרשומה", "coach", "checklist_personal_without_record", "pct"),
+    ("מלווה: מועילות (1-5)", "coach", "helpful", "num"),
+    ("מלווה: צעדים מבוססי מקור", "coach", "grounded_steps", "pct"),
+    ("מלווה: ציטוטים נתמכים", "coach", "claims_supported", "pct"),
+    ("מלווה: שניות לתשובה", "coach", "seconds_per_answer", "num"),
+    ("מלווה: עלות ($)", "coach", "cost_usd", "num"),
 ]
 
 
@@ -282,6 +303,57 @@ def safety(which: str, *, send: bool) -> str:
     return render_gate(evaluate_gate(eval_set, lambda text: gate.assess(text, anonymizer)))
 
 
+def coach_run(model: str, *, limit: int | None, baseline: bool, judge: bool) -> tuple[str, dict]:
+    """The coach on every case, against real models. Returns the report and the summary (JSON)."""
+    router = router_for(model)
+    uow = _uow()
+    eval_set = load_coach_set(COACH_SET)
+    with uow() as repos:
+        resolved, problems = resolve_cases(eval_set, repos)
+        anonymizer = Anonymizer(load_roster(repos.staff, repos.trainees))
+        actors = {s.key: s for s in repos.staff.list_all()}
+    if problems:
+        raise SystemExit(
+            "The set does not fit this academy (load the demo: python -m pacer.demo --reset):\n" + "\n".join(problems)
+        )
+    coach = Coach(uow, router, ollama_embedder(DEFAULT_EMBEDDING_MODEL), DEFAULT_CHUNKING)
+    judge_client = router.client_for(AITask.JUDGE) if judge else None
+    results: list[CoachCaseResult] = []
+    failed: list[str] = []
+    interrupted = False
+    try:
+        for item in resolved[:limit]:
+            print(f"coach {item.case.id} ...", flush=True)
+            try:
+                results.append(run_coach_case(item, coach, actors, judge_client, anonymizer, baseline=baseline))
+            except (LLMError, AnonymizationError, ServiceError, ValueError) as error:  # one case, not the run
+                failed.append(_failure(item.case.id, error))
+    except KeyboardInterrupt:
+        interrupted = True
+        print("\nStopped (Ctrl+C): reporting what was done so far.", flush=True)
+    summary = coach_summary(results)
+    judge_model = router.route(AITask.JUDGE).model if judge else None
+    meta = [
+        f"מודל עונה: **{model}** (השער: {router.route(AITask.SCREEN_RISK).model}). שופט: **{judge_model or 'בלי'}**",
+        f"סט: {eval_set.ref}. prompt: coach_advice@v{COACH_PROMPT_VERSION}. שליפה: {DEFAULT_EMBEDDING_MODEL}",
+    ]
+    if interrupted:
+        meta.append("**ההרצה נעצרה באמצע (Ctrl+C):** הציונים הם רק על המקרים שהספיקו לרוץ.")
+    if failed:
+        meta.append(f"**נכשלו ({len(failed)}), ולא נכללים בציונים:** " + "; ".join(failed))
+    summaries = {
+        "model": model,
+        "judge": judge_model,
+        "when": datetime.now(UTC).isoformat(timespec="seconds"),
+        "sets": [eval_set.ref],
+        "prompts": [f"coach_advice@v{COACH_PROMPT_VERSION}"],
+        "coach": summary,
+        "failed": failed,
+        "interrupted": interrupted,
+    }
+    return render_coach(results, summary, meta), summaries
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="python -m pacer.evaluation", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -297,6 +369,12 @@ def main(argv: list[str] | None = None) -> None:
     running.add_argument("--no-baseline", action="store_true", help="skip answering without the library")
     running.add_argument("--no-judge", action="store_true", help="skip the judge (code checks only)")
     running.add_argument("--out", type=Path, required=True, help="the report; the JSON summary goes next to it")
+    coaching = commands.add_parser("coach", help="the counselor coach on its set, against real models (costs money)")
+    coaching.add_argument("--model", default="claude-haiku", choices=list(MODELS), help="the model that advises")
+    coaching.add_argument("--limit", type=int, help="only the first N cases")
+    coaching.add_argument("--no-baseline", action="store_true", help="skip asking again without the trainee's record")
+    coaching.add_argument("--no-judge", action="store_true", help="skip the judge (code checks only)")
+    coaching.add_argument("--out", type=Path, required=True, help="the report; the JSON summary goes next to it")
     screening = commands.add_parser("safety", help="the safety gate on a risk set (--send: with the model)")
     screening.add_argument("--set", dest="which", default="heldout", choices=list(SAFETY_SETS))
     screening.add_argument("--send", action="store_true", help="also ask the model screen (costs a few cents)")
@@ -313,6 +391,10 @@ def main(argv: list[str] | None = None) -> None:
         report = check()
     elif args.command == "masking":
         report = masking()
+    elif args.command == "coach":
+        report, summaries = coach_run(
+            args.model, limit=args.limit, baseline=not args.no_baseline, judge=not args.no_judge
+        )
     elif args.command == "safety":
         report = safety(args.which, send=args.send)
     elif args.command == "compare":

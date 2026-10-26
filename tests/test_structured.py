@@ -202,3 +202,14 @@ def test_a_model_without_native_support_gets_only_the_instructions(sent):
     assert not client.native_schema
     assert "response_format" not in sent[0]
     assert '"topics"' in sent[0]["messages"][1]["content"]
+
+
+def test_text_with_braces_after_the_object_is_not_part_of_it():
+    """Sonnet as the judge: a valid object, then more text with braces. The old "first { to last }"
+    took both, and failed twice as "trailing characters" (2026-10-26)."""
+    from pacer.ai.structured import _extract_json
+
+    assert _extract_json('{"a": 1}\n{"b": 2}') == '{"a": 1}'
+    assert _extract_json('Here:\n```json\n{"a": {"b": "}"}}\n```\nNote: {x}') == '{"a": {"b": "}"}}'
+    assert _extract_json("no json at all") == "no json at all"
+    assert _extract_json('{"a": 1') == '{"a": 1'  # broken: left for validation to explain
