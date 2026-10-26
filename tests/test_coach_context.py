@@ -103,3 +103,32 @@ def test_the_personal_file_is_never_part_of_it(world, service):
     context = service.build(world.manager, world.yael.id)
     assert "Guitar" not in repr(context)
     assert "personal_files" not in CoachContextService.__init__.__code__.co_varnames
+
+
+# --- attendance (2026-10-26) ---------------------------------------------------------------------
+
+
+def test_attendance_of_the_last_30_days_comes_in(world):
+    from datetime import date, time
+
+    from pacer.domain import AttendanceStatus, ScheduledSession
+    from pacer.services import AttendanceService, Mark
+
+    service = CoachContextService(
+        world.trainees, world.groups, world.goals, world.goal_updates, world.notes, world.sessions, world.attendance
+    )
+    marking = AttendanceService(world.sessions, world.attendance, world.trainees, world.groups)
+    today = date(2026, 10, 25)
+    for day, status in [(date(2026, 10, 20), AttendanceStatus.ABSENT), (date(2026, 10, 21), AttendanceStatus.PRESENT),
+                        (date(2026, 9, 10), AttendanceStatus.ABSENT)]:  # the last one is more than 30 days back
+        session = world.sessions.add(
+            ScheduledSession(cohort_id=world.cohort.key, on=day, start=time(7), end=time(8), title="ספורט בוקר")
+        )
+        marking.mark(world.noa, session.key, [Mark(world.yael.key, status)], today=today)
+    attendance = service.build(world.noa, world.yael.id, today=today).attendance
+    assert (attendance.present, attendance.absent, attendance.rate) == (1, 1, 0.5)
+    assert attendance.missed_by_title == {"ספורט בוקר": 1}
+
+
+def test_without_today_or_the_repositories_there_is_no_attendance(world, service):
+    assert service.build(world.noa, world.yael.id).attendance is None

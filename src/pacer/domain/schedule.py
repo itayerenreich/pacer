@@ -22,6 +22,7 @@ The academy's week starts on Sunday.
 from datetime import UTC, date, datetime, time, timedelta
 from enum import IntEnum, StrEnum
 from typing import Self
+from zoneinfo import ZoneInfo
 
 from pydantic import AwareDatetime, ConfigDict, Field, model_validator
 
@@ -61,6 +62,14 @@ _DAY_LABELS = {
     Weekday.FRIDAY: "שישי",
     Weekday.SATURDAY: "שבת",
 }
+
+
+ACADEMY_TIMEZONE = ZoneInfo("Asia/Jerusalem")
+
+
+def academy_today() -> date:
+    """Today at the academy, not on the server: a server in UTC is still "yesterday" until 02:00."""
+    return datetime.now(ACADEMY_TIMEZONE).date()
 
 
 def week_start(day: date) -> date:

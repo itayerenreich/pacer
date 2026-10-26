@@ -444,3 +444,19 @@ def test_missing_required_fields_are_still_refused(uow, repos):
     coach, _ = coach_with(uow, screen(), broken, broken)
     with pytest.raises(StructuredOutputError):
         coach.ask(actor(repos, 2), QUESTION, trainee_id=1)
+
+
+def test_the_coach_reads_the_trainees_attendance(uow, repos):
+    from datetime import date, time
+
+    from pacer.domain import AttendanceRecord, AttendanceStatus, ScheduledSession
+
+    for day, status in [(date(2026, 10, 20), AttendanceStatus.ABSENT), (date(2026, 10, 21), AttendanceStatus.PRESENT)]:
+        s = repos.sessions.add(ScheduledSession(cohort_id=1, on=day, start=time(7), end=time(8), title="ספורט בוקר"))
+        repos.attendance.save(AttendanceRecord(session_id=s.key, trainee_id=1, status=status, recorded_by_id=2))
+    cloud = FakeLLMClient(answers=[screen(), advice()], runs_locally=False)
+    coach = Coach(uow, fake_router(cloud), VectorEmbedder([1.0, 0.0], floor=0.4), CHUNKING, today=lambda: date(2026, 10, 25))
+    coach.ask(actor(repos, 2), QUESTION, trainee_id=1)
+    sent = cloud.calls[1].user_message
+    assert "Attendance, last 30 days: 50% (present 1 of 2 counted; 0 excused, not counted)" in sent
+    assert "Missed most: ספורט בוקר (1)" in sent

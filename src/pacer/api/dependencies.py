@@ -21,6 +21,7 @@ Even the actor is read in its own short transaction (DetachedActor), closed befo
 """
 
 from collections.abc import Iterator
+from datetime import date
 from typing import Annotated
 
 from fastapi import Depends, Header
@@ -33,10 +34,12 @@ from pacer.ai.embeddings import DEFAULT_EMBEDDING_MODEL, Embedder, ollama_embedd
 from pacer.ai.meeting_pipeline import MeetingPipeline
 from pacer.ai.routing import Router, get_router
 from pacer.ai.talk_pipeline import TalkPipeline
-from pacer.domain import StaffMember
+from pacer.domain import StaffMember, academy_today
 from pacer.library.chunking import DEFAULT_CHUNKING
 from pacer.repositories import (
     ApprovalRequestRepository,
+    AttendanceRepository,
+    CohortRepository,
     GoalRepository,
     GoalUpdateRepository,
     GroupRepository,
@@ -44,6 +47,8 @@ from pacer.repositories import (
     PersonalFileRepository,
     PersonalTalkRepository,
     ProposedTaskRepository,
+    ScheduledSessionRepository,
+    ScheduleSlotRepository,
     StaffRepository,
     TalkProposalRepository,
     TaskRepository,
@@ -56,6 +61,8 @@ from pacer.repositories import (
 )
 from pacer.repositories.interfaces import (
     ApprovalRequestRepo,
+    AttendanceRepo,
+    CohortRepo,
     GoalRepo,
     GoalUpdateRepo,
     GroupRepo,
@@ -63,6 +70,8 @@ from pacer.repositories.interfaces import (
     PersonalFileRepo,
     PersonalTalkRepo,
     ProposedTaskRepo,
+    ScheduledSessionRepo,
+    ScheduleSlotRepo,
     StaffRepo,
     TalkProposalRepo,
     TaskRepo,
@@ -71,8 +80,10 @@ from pacer.repositories.interfaces import (
 )
 from pacer.services import (
     ApprovalService,
+    AttendanceService,
     GoalService,
     MeetingService,
+    ScheduleService,
     TalkService,
     TaskService,
     TraineeService,
@@ -262,6 +273,53 @@ def get_talk_service(
 
 
 TalkServiceDep = Annotated[TalkService, Depends(get_talk_service)]
+
+
+def get_cohort_repository(session: SessionDep) -> CohortRepo:
+    return CohortRepository(session)
+
+
+def get_slot_repository(session: SessionDep) -> ScheduleSlotRepo:
+    return ScheduleSlotRepository(session)
+
+
+def get_scheduled_session_repository(session: SessionDep) -> ScheduledSessionRepo:
+    return ScheduledSessionRepository(session)
+
+
+def get_attendance_repository(session: SessionDep) -> AttendanceRepo:
+    return AttendanceRepository(session)
+
+
+def get_schedule_service(
+    slots: Annotated[ScheduleSlotRepo, Depends(get_slot_repository)],
+    sessions: Annotated[ScheduledSessionRepo, Depends(get_scheduled_session_repository)],
+    cohorts: Annotated[CohortRepo, Depends(get_cohort_repository)],
+    groups: Annotated[GroupRepo, Depends(get_group_repository)],
+) -> ScheduleService:
+    return ScheduleService(slots, sessions, cohorts, groups)
+
+
+def get_attendance_service(
+    sessions: Annotated[ScheduledSessionRepo, Depends(get_scheduled_session_repository)],
+    attendance: Annotated[AttendanceRepo, Depends(get_attendance_repository)],
+    trainees: Annotated[TraineeRepo, Depends(get_trainee_repository)],
+    groups: Annotated[GroupRepo, Depends(get_group_repository)],
+) -> AttendanceService:
+    return AttendanceService(sessions, attendance, trainees, groups)
+
+
+ScheduleServiceDep = Annotated[ScheduleService, Depends(get_schedule_service)]
+AttendanceServiceDep = Annotated[AttendanceService, Depends(get_attendance_service)]
+
+
+def get_today() -> date:
+    """Today at the academy (domain.academy_today). Tests override it, so a rule like "no marking
+    before the day" is tested on a fixed date."""
+    return academy_today()
+
+
+TodayDep = Annotated[date, Depends(get_today)]
 
 
 # --- AI ---------------------------------------------------------------------------------------

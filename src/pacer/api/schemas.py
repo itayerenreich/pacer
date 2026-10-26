@@ -11,7 +11,7 @@ in them may be shown to a staff member who passed the permission check. The few
 responses that combine several objects (the result of an AI pipeline) are at the end.
 """
 
-from datetime import date
+from datetime import date, time
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
@@ -24,17 +24,22 @@ from pacer.ai.talk_pipeline import TalkResult
 from pacer.domain import (
     ApprovalKind,
     ApprovalRequest,
+    AttendanceStatus,
     Goal,
     GoalCategory,
     NoteKind,
     PersonalTalk,
     ProposedTask,
+    ScheduledSession,
+    ScheduleSlot,
     StaffMeeting,
     TalkProposal,
     Trainee,
     TraineeNote,
     TraineeStatus,
+    Weekday,
 )
+from pacer.services import AttendanceSummary, SheetRow
 
 
 class _Body(BaseModel):
@@ -319,4 +324,128 @@ class CoachOut(BaseModel):
             prompt=result.prompt_ref,
             cost_usd=result.cost_usd,
             removed_sentences=result.removed_sentences,
+        )
+
+
+# --- the weekly schedule and attendance --------------------------------------------------------
+
+
+class SlotCreate(_Body):
+    cohort_id: int
+    group_id: int | None = Field(default=None, description="A group's slot (a group talk); omit for the whole cohort")
+    weekday: Weekday = Field(description="Python's numbering: 6 is Sunday, 0 Monday ... 4 Friday, 5 Saturday")
+    start: time = Field(examples=["07:00"])
+    end: time = Field(examples=["08:00"])
+    title: Annotated[str, ScheduleSlot.model_fields["title"]]
+
+
+class SessionCreate(_Body):
+    """A one-off, not part of the template: a trip, a guest lecture."""
+
+    cohort_id: int
+    group_id: int | None = None
+    on: date
+    start: time
+    end: time
+    title: Annotated[str, ScheduledSession.model_fields["title"]]
+
+
+class SessionChange(_Body):
+    """Only what changes. This week only: the template stays as it is."""
+
+    title: Annotated[str | None, ScheduledSession.model_fields["title"]] = None
+    on: date | None = None
+    start: time | None = None
+    end: time | None = None
+
+
+class SessionOut(BaseModel):
+    id: int
+    cohort_id: int
+    group_id: int | None
+    on: date
+    weekday: str = Field(description="The day in Hebrew")
+    start: time
+    end: time
+    title: str
+    slot_id: int | None = Field(description="The template slot it came from; null for a one-off")
+    cancelled: bool
+
+    @classmethod
+    def of(cls, session: ScheduledSession) -> "SessionOut":
+        return cls(
+            **session.model_dump(exclude={"id"}), id=session.key, weekday=Weekday(session.on.weekday()).label
+        )
+
+
+class SlotOut(BaseModel):
+    id: int
+    cohort_id: int
+    group_id: int | None
+    weekday: Weekday
+    day: str = Field(description="The day in Hebrew")
+    start: time
+    end: time
+    title: str
+    active: bool
+
+    @classmethod
+    def of(cls, slot: ScheduleSlot) -> "SlotOut":
+        return cls(**slot.model_dump(exclude={"id"}), id=slot.key, day=slot.weekday.label)
+
+
+class MarkIn(_Body):
+    trainee_id: int
+    status: AttendanceStatus
+
+
+class AttendanceMarks(_Body):
+    marks: list[MarkIn] = Field(min_length=1, max_length=200)
+
+
+class SheetRowOut(BaseModel):
+    trainee_id: int
+    name: str
+    status: AttendanceStatus | None = Field(description="null: not marked yet")
+
+
+class SheetOut(BaseModel):
+    session: SessionOut
+    trainees: list[SheetRowOut] = Field(
+        description="The trainees YOU mark here: your groups, or everyone for the manager"
+    )
+
+    @classmethod
+    def of(cls, session: ScheduledSession, rows: list[SheetRow]) -> "SheetOut":
+        return cls(
+            session=SessionOut.of(session),
+            trainees=[SheetRowOut(trainee_id=r.trainee.key, name=r.trainee.full_name, status=r.status) for r in rows],
+        )
+
+
+class AttendanceSummaryOut(BaseModel):
+    trainee_id: int
+    name: str
+    group_id: int
+    rate: float | None = Field(description="present / (present + absent), 0-1; null when nothing counts yet")
+    percent: int | None = Field(description="The rate as a whole percent")
+    present: int
+    absent: int
+    excused: int = Field(description="Not counted against the trainee")
+    unmarked: int = Field(description="Sessions that already happened and nobody marked: not counted")
+    missed_by_title: dict[str, int] = Field(description="Absences (not excused), by session title, most first")
+
+    @classmethod
+    def of(cls, s: AttendanceSummary) -> "AttendanceSummaryOut":
+        return cls(
+            trainee_id=s.trainee.key,
+            name=s.trainee.full_name,
+            group_id=s.trainee.group_id,
+            rate=None if s.rate is None else round(s.rate, 3),
+            percent=None if s.rate is None else round(s.rate * 100),
+            present=s.present,
+            absent=s.absent,
+            excused=s.excused,
+            unmarked=s.unmarked,
+            missed_by_title=s.missed_by_title,
         )

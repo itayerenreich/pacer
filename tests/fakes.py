@@ -220,7 +220,13 @@ class FakeUnitOfWork:
     def __call__(self) -> Iterator[Repos]:
         stores = [getattr(self.repos, name) for name in Repos.__dataclass_fields__]
         kept = ("rows", "embeddings", "_next")  # what each fake store holds
-        snapshot = [{a: copy.deepcopy(getattr(store, a)) for a in kept if hasattr(store, a)} for store in stores]
+        # rows: a copy of the dict is enough. A store keeps its own copy of each model and replaces it on
+        # update, never changes it in place, so the old objects ARE the old state. (A deep copy of every
+        # row on every transaction made the suite 2.5x slower once the demo had attendance.)
+        snapshot = [
+            {a: copy.copy(getattr(store, a)) if a == "rows" else copy.deepcopy(getattr(store, a)) for a in kept if hasattr(store, a)}
+            for store in stores
+        ]
         self.open += 1
         self.opened += 1
         try:
@@ -356,15 +362,19 @@ class FakeAttendanceRepo(_Store[AttendanceRecord]):
         self.sessions = sessions  # for the date range, as the real one joins
 
     def save(self, record: AttendanceRecord) -> AttendanceRecord:
-        existing = self.where(session_id=record.session_id, trainee_id=record.trainee_id)
-        if existing:
-            saved = record.model_copy(update={"id": existing[0].id})
-            self.rows[existing[0].key] = saved.model_copy()
+        # A scan, not where(): where() copies every row, and the demo academy saves ~1,700 of them.
+        existing = next(
+            (r for r in self.rows.values() if r.session_id == record.session_id and r.trainee_id == record.trainee_id),
+            None,
+        )
+        if existing is not None:
+            saved = record.model_copy(update={"id": existing.id})
+            self.rows[existing.key] = saved.model_copy()
             return saved
         return self.add(record)
 
     def list_by_session(self, session_id: int) -> list[AttendanceRecord]:
-        return self.where(session_id=session_id)
+        return [r.model_copy() for r in self.rows.values() if r.session_id == session_id]
 
     def list_for_trainees(self, trainee_ids, first, last):
         ids = set(trainee_ids)
