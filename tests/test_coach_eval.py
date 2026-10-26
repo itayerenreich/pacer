@@ -143,3 +143,39 @@ def test_the_judge_never_receives_a_health_sentence():
 
     message = answer_message(Anonymizer(Roster([])), question="הוא לוקח ריטלין. איך לעזור?", answer="תשובה", checklist=["x"])
     assert "ריטלין" not in message and "איך לעזור" in message
+
+
+def test_a_judge_failure_keeps_the_coachs_answer(academy):
+    """C06: the judge failed, and the whole case was dropped, though the coach had answered."""
+    import json
+
+    from fake_llm import FakeLLMClient, fake_router
+    from fakes import FakeUnitOfWork
+    from test_library_answer import CHUNKING, VectorEmbedder
+
+    from pacer.ai import LLMUnavailableError
+    from pacer.ai.anonymization import Anonymizer, load_roster
+    from pacer.ai.coach import Coach, CoachOutcome
+    from pacer.evaluation.coach_eval import coach_summary, run_coach_case
+
+    def answer(message: str) -> str:
+        if "CHECKLIST:" in message:
+            raise LLMUnavailableError("the judge is down")
+        if "Trainee:" in message:
+            return json.dumps({"risk": False, "understanding": "מובן מה קורה כאן.", "questions": [],
+                               "steps": [{"action": "שיחה אישית קצרה", "example": None, "passages": []}],
+                               "involve": []}, ensure_ascii=False)
+        return json.dumps({"risk": False, "kinds": [], "reason": "nothing"})
+
+    router = fake_router(FakeLLMClient(answers=answer, runs_locally=False))
+    from pacer.ai.routing import AITask
+
+    coach = Coach(FakeUnitOfWork(academy), router, VectorEmbedder([1.0, 0.0], floor=0.4), CHUNKING)
+    item = resolve_cases(load_coach_set(COACH_SET), academy)[0][0]
+    out = run_coach_case(
+        item, coach, {s.key: s for s in academy.staff.list_all()}, router.client_for(AITask.JUDGE),
+        Anonymizer(load_roster(academy.staff, academy.trainees)), baseline=True,
+    )
+    assert out.result.outcome is CoachOutcome.ADVICE and out.grade is None
+    assert out.notes == ["judge failed: LLMUnavailableError"]
+    assert coach_summary([out])["judge_failed"] == 1

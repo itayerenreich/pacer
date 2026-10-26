@@ -421,3 +421,26 @@ def test_a_whitespace_question_is_422_not_500(api):
     client, _ = api
     assert post(client, 2, question="          ", trainee_id=1).status_code == 422
     assert client.post("/library/ask", json={"question": "        "}, headers={"X-Staff-Id": "1"}).status_code == 422
+
+
+# --- the first real evaluation run (2026-10-26) --------------------------------------------------
+
+
+def test_a_stray_key_from_the_model_is_dropped_not_a_502(uow, repos):
+    """Haiku added a top-level "example" key twice, and the counselor got an error (C04)."""
+    answer = json.loads(advice())
+    answer["example"] = "משפט שהמודל שם במקום הלא נכון"
+    answer["steps"][0]["note"] = "גם כאן"
+    coach, cloud = coach_with(uow, screen(), json.dumps(answer, ensure_ascii=False))
+    result = coach.ask(actor(repos, 2), QUESTION, trainee_id=1)
+    assert result.outcome is CoachOutcome.ADVICE and len(cloud.calls) == 2  # no correction needed
+    assert "המקום הלא נכון" not in repr(result.advice)
+
+
+def test_missing_required_fields_are_still_refused(uow, repos):
+    from pacer.ai.structured import StructuredOutputError
+
+    broken = json.dumps({"understanding": "חסר כמעט הכול כאן", "questions": []})
+    coach, _ = coach_with(uow, screen(), broken, broken)
+    with pytest.raises(StructuredOutputError):
+        coach.ask(actor(repos, 2), QUESTION, trainee_id=1)

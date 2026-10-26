@@ -141,12 +141,20 @@ def complete_structured[T: BaseModel](
 
 
 def _extract_json(text: str) -> str:
-    """From the first '{' to the last '}'. Covers ```json fences and a sentence before or after."""
+    """The first complete JSON object in the answer. Covers ```json fences, a sentence before or after,
+    and text AFTER the object that has braces of its own (a second object, a note): "from the first '{'
+    to the last '}'" swallowed those, and a valid answer failed as "trailing characters" twice
+    (the coach evaluation, 2026-10-26). If no object parses, the text as it is: validation explains why."""
     text = text.strip()
-    start, end = text.find("{"), text.rfind("}")
-    if start >= 0 and end > start:
-        return text[start : end + 1]
-    return text
+    start = text.find("{")
+    if start < 0:
+        return text
+    try:
+        _, end = json.JSONDecoder().raw_decode(text, start)
+    except json.JSONDecodeError:
+        end = text.rfind("}") + 1
+        return text[start:end] if end > start else text
+    return text[start:end]
 
 
 def _describe(error: ValidationError) -> list[str]:

@@ -83,6 +83,13 @@ WITHHELD_UNDERSTANDING = "(הסבר המצב הושמט: עסק בבריאות)"
 # --- what the model must return ------------------------------------------------------------------
 
 
+# The coach's answer IGNORES keys it does not know, instead of rejecting the whole answer (extra="forbid",
+# as the other pipelines do). Measured 2026-10-26: Claude Haiku twice added a stray "example" key at the
+# top level of an otherwise valid answer, and the counselor got a 502 for 1 of 9 questions. A key we do
+# not know is never shown, so dropping it is safe; failing the counselor is not. Every required field is
+# still required, every type and length still checked.
+
+
 class InvolveRole(StrEnum):
     MANAGER = "manager"
     PARENTS = "parents"
@@ -103,7 +110,7 @@ _ROLE_LABELS = {
 
 
 class CoachStep(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")  # unknown keys dropped: see the note above InvolveRole
 
     action: str = Field(min_length=5, max_length=600, description="One clear action, in Hebrew")
     example: str | None = Field(
@@ -115,14 +122,14 @@ class CoachStep(BaseModel):
 
 
 class Involve(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")  # unknown keys dropped: see the note above InvolveRole
 
     role: InvolveRole
     why: str = Field(min_length=3, max_length=300, description="One Hebrew sentence")
 
 
 class CoachAnswer(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")  # unknown keys dropped: see the note above InvolveRole
 
     risk: bool = Field(
         description="True if, despite the safety check, the text suggests someone may be at risk: the code then "

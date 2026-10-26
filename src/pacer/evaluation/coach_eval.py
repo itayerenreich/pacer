@@ -152,15 +152,19 @@ def run_coach_case(
     if result.advice is None or judge is None:
         return out
     claims = [(s.action, s.passages) for s in result.advice.steps if s.grounded]
-    out.grade = grade_answer(
-        judge,
-        anonymizer,
-        question=case.question,
-        answer=advice_text(result),
-        checklist=case.checklist,
-        claims=claims,
-        passages=result.passages,
-    )
+    try:  # the JUDGE failing is not the coach failing: the answer and its outcome are kept
+        out.grade = grade_answer(
+            judge,
+            anonymizer,
+            question=case.question,
+            answer=advice_text(result),
+            checklist=case.checklist,
+            claims=claims,
+            passages=result.passages,
+        )
+    except Exception as error:  # noqa: BLE001 - reported in the case, the run goes on
+        out.notes.append(f"judge failed: {type(error).__name__}")
+        return out
     if baseline and resolved.trainee_id is not None:
         # The same question about the same trainee (same permissions, same reading of names), without
         # the record: the only difference between the two answers is what the coach knows about them.
@@ -224,6 +228,10 @@ def coach_summary(results: Sequence[CoachCaseResult]) -> dict:
         "skipped_verdicts": _checklist(advised)[1] + _checklist(with_trainee, baseline=True)[1],
         "helpful": None if not helpful else round(sum(helpful) / len(helpful), 2),
         "grounded_steps": _rate(sum(r.grounded for r in advised), sum(r.steps for r in advised)),
+        # 0% grounded: no passage above the floor (a content gap), or passages the coach did not use?
+        "advised": sum(r.result.advice is not None for r in advised),
+        "with_passages": sum(bool(r.result.passages) for r in advised),
+        "judge_failed": sum(any(n.startswith("judge failed") for n in r.notes) for r in results),
         "claims_supported": _rate(sum(v is True for v in claims), len(claims)),
         "issues": sum(len(r.result.advice.issues) for r in advised if r.result.advice),
         "seconds_per_answer": None if not results else round(sum(r.seconds for r in results) / len(results), 1),
@@ -253,6 +261,7 @@ def render_coach(results: Sequence[CoachCaseResult], summary: dict, meta: Sequen
         f"| בלי אבחנה, תוויות רפואיות או עצה טיפולית | {_pct(summary['always_checked'])} |",
         f"| מועילות (שופט, 1-5) | {summary['helpful'] or '-'} |",
         f"| צעדים מבוססי מקור | {_pct(summary['grounded_steps'])} |",
+        f"| תשובות שקיבלו קטעים מהספרייה | {summary['with_passages']}/{summary['advised']} |",
         f"| ציטוטים שהקטע באמת תומך בהם | {_pct(summary['claims_supported'])} |",
         f"| בעיות שהוולידציה תיקנה | {summary['issues']} |",
         f"| שניות לתשובה | {summary['seconds_per_answer']} |",
@@ -261,7 +270,10 @@ def render_coach(results: Sequence[CoachCaseResult], summary: dict, meta: Sequen
     for r in results:
         lines += ["", f"## {r.case.id}: {r.case.tests}", "", f"**שאלה:** {r.case.question}", ""]
         mark = "✓" if r.outcome_ok else "✗"
-        lines.append(f"תוצאה: {r.result.outcome} (צפוי {r.case.outcome}) {mark} · {r.seconds:.0f} שניות")
+        lines.append(
+            f"תוצאה: {r.result.outcome} (צפוי {r.case.outcome}) {mark} · {r.seconds:.0f} שניות"
+            f" · קטעים מהספרייה: {len(r.result.passages)}"
+        )
         lines += ["", "```", advice_text(r.result), "```"]
         if r.grade:
             items = [*r.case.checklist]

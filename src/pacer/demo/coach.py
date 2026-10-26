@@ -83,6 +83,7 @@ def render(result: CoachResult) -> str:
         lines += ["", *[f"- {s.contact}" for s in result.referral.steps if s.contact]]
     if result.advice is not None:
         cited = [c for c in result.advice.citations if c.cited]
+        lines += ["", f"קטעים מהספרייה שנשלחו למלווה: {len(result.advice.citations)}, מהם צוטטו: {len(cited)}"]
         if cited:
             lines += ["", "**מקורות:**", *[f"- {c.passage}: {c.source} · {c.evidence}" for c in cited]]
         if result.advice.issues:
