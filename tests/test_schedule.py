@@ -42,7 +42,7 @@ def world() -> World:
 
 @pytest.fixture
 def schedule(world) -> ScheduleService:
-    return ScheduleService(world.slots, world.sessions, world.cohorts, world.groups)
+    return ScheduleService(world.slots, world.sessions, world.cohorts, world.groups, world.attendance)
 
 
 @pytest.fixture
@@ -283,3 +283,81 @@ def test_group_sessions_count_only_for_their_group(world, schedule, attendance):
     published(world, schedule, slot(world, title="שיחת קבוצה", group_id=world.group_b.key))
     summary = attendance.trainee_summary(world.manager, world.yael.key, SUNDAY, TODAY, today=TODAY)
     assert summary.unmarked == 0  # group B's talk is not Yael's
+
+
+# --- the independent review's findings (2026-10-26) ----------------------------------------------
+
+
+def test_publishing_again_after_moving_a_session_in_the_week_adds_no_duplicate(world, schedule):
+    (session,) = published(world, schedule, slot(world))
+    schedule.change_session(world.manager, session.key, on=date(2026, 10, 19))  # Sunday -> Monday
+    assert schedule.publish_week(world.manager, world.cohort.key, SUNDAY) == []
+    assert len(schedule.week(world.cohort.key, SUNDAY)) == 1
+
+
+def test_a_template_session_moves_only_within_its_week(world, schedule):
+    (session,) = published(world, schedule, slot(world))
+    with pytest.raises(RuleViolationError, match="own week"):
+        schedule.change_session(world.manager, session.key, on=date(2026, 10, 26))
+
+
+def test_a_template_session_cannot_land_on_another_session_of_its_slot(world, schedule):
+    """The database's unique (slot, date) would be a 500; the service says it first, as a 409. (Two
+    sessions of one slot in a week happen when the manager adds the slot twice by mistake.)"""
+    (sunday,) = published(world, schedule, slot(world))
+    twin = world.sessions.add(sunday.model_copy(update={"id": None, "on": date(2026, 10, 20)}))
+    with pytest.raises(RuleViolationError, match="already has a session"):
+        schedule.change_session(world.manager, sunday.key, on=twin.on)
+    assert world.sessions.get(sunday.key).on == SUNDAY
+
+
+def test_a_session_stays_inside_the_cohort(world, schedule):
+    trip = ScheduledSession(cohort_id=world.cohort.key, on=date(2027, 7, 15), start=time(8), end=time(18), title="טיול")
+    with pytest.raises(RuleViolationError, match="outside the cohort"):
+        schedule.add_session(world.manager, trip)
+    one_off = schedule.add_session(world.manager, trip.model_copy(update={"on": date(2027, 6, 1)}))
+    with pytest.raises(RuleViolationError, match="outside the cohort"):
+        schedule.change_session(world.manager, one_off.key, on=date(2027, 7, 1))
+
+
+def test_a_session_with_attendance_keeps_its_date(world, schedule, attendance):
+    (session,) = published(world, schedule, slot(world))
+    attendance.mark(world.noa, session.key, [Mark(world.yael.key, P)], today=TODAY)
+    with pytest.raises(RuleViolationError, match="has attendance"):
+        schedule.change_session(world.manager, session.key, on=date(2026, 10, 19))
+    assert schedule.change_session(world.manager, session.key, title="ספורט").title == "ספורט"  # other changes: fine
+
+
+def test_a_trainee_who_moved_groups_keeps_their_marked_past(world, schedule, attendance):
+    (talk,) = published(world, schedule, slot(world, title="שיחת קבוצה", group_id=world.group_a.key))
+    attendance.mark(world.noa, talk.key, [Mark(world.yael.key, A)], today=TODAY)
+    world.trainees.update(world.yael.model_copy(update={"group_id": world.group_b.key, "primary_counselor_id": world.dana.key}))
+    summary = attendance.trainee_summary(world.manager, world.yael.key, SUNDAY, TODAY, today=TODAY)
+    assert (summary.absent, summary.rate) == (1, 0.0)
+    _, rows = attendance.sheet(world.manager, talk.key)
+    assert [(r.trainee.first_name, r.status) for r in rows] == [("Yael", A), ("Ori", None)]
+
+
+def test_a_trainee_on_leave_stays_on_the_past_sheet(world, schedule, attendance):
+    (session,) = published(world, schedule, slot(world))
+    attendance.mark(world.noa, session.key, [Mark(world.ori.key, P)], today=TODAY)
+    world.trainees.update(world.trainees.get(world.ori.key).with_status(TraineeStatus.ON_LEAVE))
+    _, rows = attendance.sheet(world.noa, session.key)
+    assert ("Ori", P) in [(r.trainee.first_name, r.status) for r in rows]
+
+
+def test_todays_sessions_are_not_unmarked_yet(world, schedule, attendance):
+    published(world, schedule, slot(world, Weekday.SUNDAY), slot(world, Weekday.MONDAY, title="ערב"))
+    summary = attendance.trainee_summary(world.noa, world.yael.key, SUNDAY, date(2026, 10, 19), today=date(2026, 10, 19))
+    assert summary.unmarked == 1  # Sunday; Monday's evening is today
+
+
+def test_a_group_of_another_cohort_is_refused(world, attendance):
+    other = world.groups.add(Group(name="Elsewhere", cohort_id=999, counselor_ids=[]))
+    with pytest.raises(RuleViolationError):
+        attendance.group_summary(world.manager, world.cohort.key, SUNDAY, TODAY, today=TODAY, group_id=other.key)
+
+
+def test_an_unknown_cohort_is_404_for_the_template_too(schedule):
+    with pytest.raises(NotFoundError):
+        schedule.slots(999)

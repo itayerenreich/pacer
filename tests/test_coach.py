@@ -451,12 +451,22 @@ def test_the_coach_reads_the_trainees_attendance(uow, repos):
 
     from pacer.domain import AttendanceRecord, AttendanceStatus, ScheduledSession
 
-    for day, status in [(date(2026, 10, 20), AttendanceStatus.ABSENT), (date(2026, 10, 21), AttendanceStatus.PRESENT)]:
-        s = repos.sessions.add(ScheduledSession(cohort_id=1, on=day, start=time(7), end=time(8), title="ספורט בוקר"))
+    sessions = [
+        (date(2026, 10, 20), AttendanceStatus.ABSENT, "ספורט בוקר", 1),  # a template session
+        (date(2026, 10, 21), AttendanceStatus.PRESENT, "ספורט בוקר", 1),
+        (date(2026, 10, 22), AttendanceStatus.ABSENT, "פגישה עם יואב מהעירייה", None),  # a one-off: free text
+        (date(2026, 10, 23), AttendanceStatus.ABSENT, "בדיקות רפואיות לפני גיוס", 2),  # health, even in the template
+    ]
+    for day, status, title, slot_id in sessions:
+        s = repos.sessions.add(
+            ScheduledSession(cohort_id=1, on=day, start=time(7), end=time(8), title=title, slot_id=slot_id)
+        )
         repos.attendance.save(AttendanceRecord(session_id=s.key, trainee_id=1, status=status, recorded_by_id=2))
     cloud = FakeLLMClient(answers=[screen(), advice()], runs_locally=False)
     coach = Coach(uow, fake_router(cloud), VectorEmbedder([1.0, 0.0], floor=0.4), CHUNKING, today=lambda: date(2026, 10, 25))
     coach.ask(actor(repos, 2), QUESTION, trainee_id=1)
     sent = cloud.calls[1].user_message
-    assert "Attendance, last 30 days: 50% (present 1 of 2 counted; 0 excused, not counted)" in sent
-    assert "Missed most: ספורט בוקר (1)" in sent
+    assert "Attendance, last 30 days: 25% (present 1 of 4 counted; 0 excused, not counted)" in sent
+    assert "  - ספורט בוקר (1)" in sent
+    assert "פגישה" not in sent and "יואב" not in sent  # a one-off's title never goes
+    assert "רפואיות" not in sent  # a health title is removed on its own line

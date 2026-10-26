@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 
 from pacer.domain import (
     ApprovalKind,
@@ -43,30 +44,34 @@ from pacer.repositories import Repos, ScoredChunk
 
 
 class _Store[M: BaseModel]:
-    """add / get / update by id, with ids handed out like a database sequence."""
+    """add / get / update by id, with ids handed out like a database sequence.
+
+    Every model goes in and out as a DEEP copy: a list or dict field (Group.counselor_ids) changed by a
+    caller must never change the stored row. That is also why FakeUnitOfWork may snapshot rows with a
+    shallow copy of the dict (independent review, 2026-10-26)."""
 
     def __init__(self) -> None:
         self.rows: dict[int, M] = {}
 
     def add(self, item: M) -> M:
-        new_id = len(self.rows) + 1
-        saved = item.model_copy(update={"id": new_id})
-        self.rows[new_id] = saved.model_copy()
+        new_id = max(self.rows, default=0) + 1  # like a sequence: never reuses the id of a deleted row
+        saved = item.model_copy(update={"id": new_id}, deep=True)
+        self.rows[new_id] = saved.model_copy(deep=True)
         return saved
 
     def get(self, item_id: int) -> M | None:
         item = self.rows.get(item_id)
-        return None if item is None else item.model_copy()
+        return None if item is None else item.model_copy(deep=True)
 
     def update(self, item: M) -> M:
         if item.id not in self.rows:
             raise LookupError(f"{type(item).__name__} {item.id} does not exist")
-        self.rows[item.id] = item.model_copy()
+        self.rows[item.id] = item.model_copy(deep=True)
         return item
 
     def where(self, **fields) -> list[M]:
         return [
-            item.model_copy()
+            item.model_copy(deep=True)
             for item in self.rows.values()
             if all(getattr(item, name) == value for name, value in fields.items())
         ]
@@ -220,11 +225,15 @@ class FakeUnitOfWork:
     def __call__(self) -> Iterator[Repos]:
         stores = [getattr(self.repos, name) for name in Repos.__dataclass_fields__]
         kept = ("rows", "embeddings", "_next")  # what each fake store holds
-        # rows: a copy of the dict is enough. A store keeps its own copy of each model and replaces it on
-        # update, never changes it in place, so the old objects ARE the old state. (A deep copy of every
-        # row on every transaction made the suite 2.5x slower once the demo had attendance.)
+        # rows: a copy of the dict is enough. A store keeps its own deep copy of each model, hands out
+        # deep copies, and replaces a row on update, never changes it in place: so the old objects ARE
+        # the old state. (A deep copy of every row on every transaction made the suite 2.5x slower.)
         snapshot = [
-            {a: copy.copy(getattr(store, a)) if a == "rows" else copy.deepcopy(getattr(store, a)) for a in kept if hasattr(store, a)}
+            {
+                a: copy.copy(getattr(store, a)) if a == "rows" else copy.deepcopy(getattr(store, a))
+                for a in kept
+                if hasattr(store, a)
+            }
             for store in stores
         ]
         self.open += 1
@@ -342,10 +351,21 @@ class FakeScheduleSlotRepo(_Store[ScheduleSlot]):
 
 
 class FakeScheduledSessionRepo(_Store[ScheduledSession]):
+    """Enforces uq_scheduled_sessions_slot_date on add AND update, as the database does."""
+
+    def _check_unique(self, item: ScheduledSession) -> None:
+        if item.slot_id is not None and any(
+            s.slot_id == item.slot_id and s.on == item.on and s.id != item.id for s in self.rows.values()
+        ):
+            raise IntegrityError("uq_scheduled_sessions_slot_date", None, Exception("duplicate"))
+
     def add(self, item: ScheduledSession) -> ScheduledSession:
-        if item.slot_id is not None and self.where(slot_id=item.slot_id, on=item.on):
-            raise ValueError("uq_scheduled_sessions_slot_date")  # what the database's constraint does
+        self._check_unique(item)
         return super().add(item)
+
+    def update(self, item: ScheduledSession) -> ScheduledSession:
+        self._check_unique(item)
+        return super().update(item)
 
     def list_between(self, cohort_id, first, last):
         found = [s for s in self.where(cohort_id=cohort_id) if first <= s.on <= last]

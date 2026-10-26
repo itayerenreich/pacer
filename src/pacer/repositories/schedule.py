@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from datetime import date
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from pacer.domain import AttendanceRecord, ScheduledSession, ScheduleSlot
@@ -100,20 +101,23 @@ class AttendanceRepository:
         self._session = session
 
     def save(self, record: AttendanceRecord) -> AttendanceRecord:
-        """Insert, or replace the record of the same (session, trainee): marking again corrects it."""
-        row = self._session.scalars(
-            select(AttendanceRow).where(
-                AttendanceRow.session_id == record.session_id, AttendanceRow.trainee_id == record.trainee_id
+        """Insert, or replace the record of the same (session, trainee): marking again corrects it.
+        One statement, INSERT ... ON CONFLICT DO UPDATE, so two counselors marking the same trainee at
+        the same moment both succeed (the later one wins). A read-then-insert would let both see "no
+        record" and the second fail on the unique constraint (independent review, 2026-10-26)."""
+        values = row_values(record)
+        statement = (
+            insert(AttendanceRow)
+            .values(**values)
+            .on_conflict_do_update(
+                constraint="uq_attendance_session_trainee",
+                set_={key: values[key] for key in ("status", "recorded_by_id", "recorded_at")},
             )
-        ).first()
-        if row is None:
-            row = AttendanceRow(**row_values(record))
-            self._session.add(row)
-        else:
-            for column, value in row_values(record).items():
-                setattr(row, column, value)
-        self._session.flush()
-        return record.model_copy(update={"id": row.id})
+            .returning(AttendanceRow.id)
+        )
+        row_id = self._session.execute(statement).scalar_one()
+        self._session.expire_all()  # the ORM may hold an older copy of that row
+        return record.model_copy(update={"id": row_id})
 
     def list_by_session(self, session_id: int) -> list[AttendanceRecord]:
         rows = self._session.scalars(select(AttendanceRow).where(AttendanceRow.session_id == session_id))

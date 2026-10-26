@@ -168,17 +168,22 @@ def coach_document(question: str, context: TraineeContext | None) -> str:
 
 
 def _attendance_lines(context: TraineeContext) -> list[str]:
+    """The rate, and the template sessions missed most: one title per line, so that a title about
+    health is removed on its own by remove_sensitive_sentences, like any line (review, 2026-10-26)."""
     a = context.attendance
     if a is None:
         return []
     if a.rate is None:
         return [f"Attendance, last {ATTENDANCE_DAYS} days: nothing recorded yet"]
-    line = (
+    lines = [
         f"Attendance, last {ATTENDANCE_DAYS} days: {round(a.rate * 100)}% "
         f"(present {a.present} of {a.counted} counted; {a.excused} excused, not counted)"
-    )
-    missed = ", ".join(f"{title} ({n})" for title, n in list(a.missed_by_title.items())[:3])
-    return [line] + ([f"  Missed most: {missed}"] if missed else [])
+    ]
+    missed = list(a.missed_in_template.items())[:3]
+    if missed:
+        lines.append("  Missed most:")
+        lines += [f"  - {title} ({n})" for title, n in missed]
+    return lines
 
 
 @dataclass(frozen=True)

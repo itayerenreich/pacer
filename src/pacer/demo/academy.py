@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
 
 from pacer.domain import (
+    ACADEMY_TIMEZONE,
     ApprovalKind,
     ApprovalRequest,
     ApprovalStatus,
@@ -359,7 +360,7 @@ class _Schedule:
     def __init__(self, repos: Repos, rng: random.Random, now: datetime, cohort: Cohort, summary: Summary) -> None:
         self.r = repos
         self.rng = rng
-        self.today = now.date()
+        self.today = now.astimezone(ACADEMY_TIMEZONE).date()  # the academy's day, not UTC's
         self.cohort = cohort
         self.summary = summary
 
@@ -408,7 +409,7 @@ class _Schedule:
                         trainee_id=trainee.key,
                         status=self._status(trainee.full_name, session.title),
                         recorded_by_id=trainee.primary_counselor_id,
-                        recorded_at=datetime.combine(session.on, session.end, UTC),
+                        recorded_at=datetime.combine(session.on, session.end, ACADEMY_TIMEZONE),
                     )
                 )
                 self.summary.attendance_count += 1

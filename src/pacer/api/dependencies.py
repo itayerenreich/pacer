@@ -296,8 +296,9 @@ def get_schedule_service(
     sessions: Annotated[ScheduledSessionRepo, Depends(get_scheduled_session_repository)],
     cohorts: Annotated[CohortRepo, Depends(get_cohort_repository)],
     groups: Annotated[GroupRepo, Depends(get_group_repository)],
+    attendance: Annotated[AttendanceRepo, Depends(get_attendance_repository)],
 ) -> ScheduleService:
-    return ScheduleService(slots, sessions, cohorts, groups)
+    return ScheduleService(slots, sessions, cohorts, groups, attendance)
 
 
 def get_attendance_service(

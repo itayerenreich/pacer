@@ -10,8 +10,11 @@ Rules (decision 2026-10-26):
 * Who marks: a counselor marks the trainees of the groups they lead; the manager marks everyone.
   A trainee the actor may not see is 404, as everywhere (visibility.py).
 * A session is marked on its day or after it, never before; a cancelled session is never marked.
-* Rate = present / (present + absent). Excused is not counted against the trainee; a session that
-  was not marked yet is "unmarked", and is not counted as either. None when nothing counts yet.
+* Rate = present / (present + absent). Excused is not counted against the trainee; a session before
+  today that nobody marked is "unmarked", and is not counted as either (today's are still being
+  marked). None when nothing counts yet.
+* The past stays as it was: a trainee marked at a session keeps that mark in their rate and on the
+  sheet, even after moving to another group or going on leave.
 """
 
 import logging
@@ -23,12 +26,14 @@ from datetime import date, time, timedelta
 from pacer.domain import (
     AttendanceRecord,
     AttendanceStatus,
+    Cohort,
     ScheduledSession,
     ScheduleSlot,
     StaffMember,
     Trainee,
     TraineeStatus,
     Weekday,
+    week_start,
 )
 from pacer.repositories.interfaces import (
     AttendanceRepo,
@@ -60,14 +65,25 @@ def _sunday(day: date) -> date:
     return day
 
 
+def _in_cohort(cohort: Cohort, day: date) -> None:
+    if not cohort.start_date <= day <= cohort.end_date:
+        raise RuleViolationError(f"{day} is outside the cohort ({cohort.start_date} to {cohort.end_date})")
+
+
 class ScheduleService:
     def __init__(
-        self, slots: ScheduleSlotRepo, sessions: ScheduledSessionRepo, cohorts: CohortRepo, groups: GroupRepo
+        self,
+        slots: ScheduleSlotRepo,
+        sessions: ScheduledSessionRepo,
+        cohorts: CohortRepo,
+        groups: GroupRepo,
+        attendance: AttendanceRepo,
     ) -> None:
         self._slots = slots
         self._sessions = sessions
         self._cohorts = cohorts
         self._groups = groups
+        self._attendance = attendance
 
     # --- the template -----------------------------------------------------------------------
 
@@ -81,6 +97,7 @@ class ScheduleService:
 
     def slots(self, cohort_id: int) -> list[ScheduleSlot]:
         """The template, active slots only, in the academy's week order (Sunday first)."""
+        found(self._cohorts.get(cohort_id), "Cohort", cohort_id)
         active = [s for s in self._slots.list_by_cohort(cohort_id) if s.active]
         return sorted(active, key=lambda s: (s.weekday.offset, s.start, s.id))
 
@@ -95,8 +112,9 @@ class ScheduleService:
     # --- weeks ------------------------------------------------------------------------------
 
     def publish_week(self, actor: StaffMember, cohort_id: int, sunday: date) -> list[ScheduledSession]:
-        """This week's sessions from the template. Safe to run again: a slot that already has its
-        session this week is skipped, so a slot added to the template later can be published too."""
+        """This week's sessions from the template. Safe to run again: a slot that already has a
+        session ANYWHERE this week is skipped (also one the manager moved to another day of it), so a
+        slot added to the template later can be published too."""
         require(is_manager(actor), "change the schedule")
         cohort = found(self._cohorts.get(cohort_id), "Cohort", cohort_id)
         _sunday(sunday)
@@ -105,11 +123,11 @@ class ScheduleService:
             dates = f"{cohort.start_date} to {cohort.end_date}"
             raise RuleViolationError(f"The week of {sunday} is outside the cohort ({dates})")
         slots = self.slots(cohort_id)
-        made = self._sessions.slot_dates((s.key for s in slots), sunday, saturday)
+        made = {slot_id for slot_id, _ in self._sessions.slot_dates((s.key for s in slots), sunday, saturday)}
         created = []
         for slot in slots:
             day = slot.on_week(sunday)
-            if (slot.key, day) in made or not cohort.start_date <= day <= cohort.end_date:
+            if slot.key in made or not cohort.start_date <= day <= cohort.end_date:
                 continue
             created.append(self._sessions.add(ScheduledSession.from_slot(slot, sunday)))
         log.info("Week of %s published for cohort %s: %s new sessions", sunday, cohort_id, len(created))
@@ -125,8 +143,9 @@ class ScheduleService:
     def add_session(self, actor: StaffMember, session: ScheduledSession) -> ScheduledSession:
         """A one-off: a trip, a guest lecture. It is not part of the template."""
         require(is_manager(actor), "change the schedule")
-        found(self._cohorts.get(session.cohort_id), "Cohort", session.cohort_id)
+        cohort = found(self._cohorts.get(session.cohort_id), "Cohort", session.cohort_id)
         _check_group(self._groups, session.cohort_id, session.group_id)
+        _in_cohort(cohort, session.on)
         if session.slot_id is not None:
             raise RuleViolationError("A one-off session has no template slot")
         return self._sessions.add(session)
@@ -141,9 +160,25 @@ class ScheduleService:
         end: time | None = None,
         on: date | None = None,
     ) -> ScheduledSession:
+        """A new date must be inside the cohort, and, for a template session, inside its own week (one
+        session per slot per week: that is how publishing knows the week has it) and free of another
+        session of the same slot. A session with attendance keeps its date: its marks belong to that
+        day (cancel it and add a one-off instead)."""
         require(is_manager(actor), "change the schedule")
         session = found(self._sessions.get(session_id), "Session", session_id)
         changes = {k: v for k, v in {"title": title, "start": start, "end": end, "on": on}.items() if v is not None}
+        if on is not None and on != session.on:
+            cohort = found(self._cohorts.get(session.cohort_id), "Cohort", session.cohort_id)
+            _in_cohort(cohort, on)
+            if self._attendance.list_by_session(session.key):
+                raise RuleViolationError(
+                    f"Session {session_id} has attendance for {session.on}: cancel it and add a one-off instead"
+                )
+            if session.slot_id is not None:
+                if week_start(on) != week_start(session.on):
+                    raise RuleViolationError("A template session moves only within its own week")
+                if (session.slot_id, on) in self._sessions.slot_dates([session.slot_id], on, on):
+                    raise RuleViolationError(f"This slot already has a session on {on}")
         return self._sessions.update(session.changed(**changes))
 
     def cancel_session(self, actor: StaffMember, session_id: int) -> ScheduledSession:
@@ -168,8 +203,11 @@ class AttendanceSummary:
     present: int
     absent: int
     excused: int
-    unmarked: int  # sessions that already happened and nobody marked
+    unmarked: int  # sessions before today that nobody marked (today's are still being marked)
     missed_by_title: dict[str, int] = field(default_factory=dict)  # absent (not excused), by session title
+    # The same, for sessions of the weekly template only: what the coach reads. A one-off's title is
+    # free text written for one day ("a meeting with X about Y") and is kept off any model.
+    missed_in_template: dict[str, int] = field(default_factory=dict)
 
     @property
     def counted(self) -> int:
@@ -220,10 +258,17 @@ class AttendanceService:
         return [t for t in trainees if sees(t)]
 
     def sheet(self, actor: StaffMember, session_id: int) -> tuple[ScheduledSession, list[SheetRow]]:
-        """The session, and the trainees this actor marks there, with what was marked so far."""
+        """The session, and the trainees this actor marks there, with what was marked so far. Who was
+        MARKED stays on the sheet even if they are no longer expected (moved group, on leave): the past
+        is not rewritten by a change today."""
         session = found(self._sessions.get(session_id), "Session", session_id)
         marked = {r.trainee_id: r.status for r in self._attendance.list_by_session(session_id)}
-        rows = [SheetRow(t, marked.get(t.key)) for t in self._visible(actor, self._expected(session))]
+        expected = {t.key: t for t in self._expected(session)}
+        for trainee_id in marked.keys() - expected.keys():
+            if (trainee := self._trainees.get(trainee_id)) is not None:
+                expected[trainee_id] = trainee
+        people = sorted(expected.values(), key=lambda t: t.key)
+        rows = [SheetRow(t, marked.get(t.key)) for t in self._visible(actor, people)]
         return session, rows
 
     def mark(
@@ -259,7 +304,7 @@ class AttendanceService:
     def _summaries(self, trainees: Sequence[Trainee], first: date, last: date, today: date) -> list[AttendanceSummary]:
         if not trainees:
             return []
-        last_counted = min(last, today)  # a future session is not "unmarked"
+        last_counted = min(last, today)  # a future session is not counted at all
         cohorts = {t.cohort_id for t in trainees}
         sessions = [
             s
@@ -275,14 +320,26 @@ class AttendanceService:
         }
         result = []
         for trainee in trainees:
-            mine = [s for s in sessions if s.cohort_id == trainee.cohort_id and s.group_id in (None, trainee.group_id)]
+            # A session is this trainee's if they were MARKED there (the past as it was, even after a move
+            # to another group), or if it is of their cohort and group now.
+            mine = [
+                s
+                for s in sessions
+                if (trainee.key, s.key) in records
+                or (s.cohort_id == trainee.cohort_id and s.group_id in (None, trainee.group_id))
+            ]
             counts: Counter[AttendanceStatus | None] = Counter()
             missed: Counter[str] = Counter()
+            missed_template: Counter[str] = Counter()
             for session in mine:
                 status = records.get((trainee.key, session.key))
+                if status is None and session.on >= today:
+                    continue  # today's sessions are marked during the day: not "unmarked" yet
                 counts[status] += 1
                 if status is AttendanceStatus.ABSENT:
                     missed[session.title] += 1
+                    if session.slot_id is not None:
+                        missed_template[session.title] += 1
             result.append(
                 AttendanceSummary(
                     trainee=trainee,
@@ -291,6 +348,7 @@ class AttendanceService:
                     excused=counts[AttendanceStatus.EXCUSED],
                     unmarked=counts[None],
                     missed_by_title=dict(missed.most_common()),
+                    missed_in_template=dict(missed_template.most_common()),
                 )
             )
         return result
@@ -321,6 +379,8 @@ class AttendanceService:
             group = found(self._groups.get(group_id), "Group", group_id)
             if not can_view_trainee(actor, group):
                 raise hidden("Group", group_id)
+            if group.cohort_id != cohort_id:
+                raise RuleViolationError(f"Group {group_id} belongs to cohort {group.cohort_id}, not {cohort_id}")
         trainees = [
             t
             for t in self._trainees.list_all()

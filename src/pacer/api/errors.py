@@ -26,6 +26,7 @@ import logging
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
+from sqlalchemy.exc import IntegrityError
 
 from pacer.ai import LLMError
 from pacer.ai.anonymization import AnonymizationError
@@ -47,6 +48,9 @@ STATUS_BY_ERROR: dict[type[Exception], int] = {
     NotFoundError: status.HTTP_404_NOT_FOUND,
     RuleViolationError: status.HTTP_409_CONFLICT,
     DomainRuleError: status.HTTP_409_CONFLICT,
+    # The database's own rules (unique, check): a rule the services did not see coming, e.g. two
+    # requests at the same moment. A conflict, not a crash; the message never shows the SQL.
+    IntegrityError: status.HTTP_409_CONFLICT,
     StructuredOutputError: status.HTTP_502_BAD_GATEWAY,
     LLMError: status.HTTP_503_SERVICE_UNAVAILABLE,
     PrivacyViolation: status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -60,6 +64,8 @@ _FIXED_DETAIL: dict[type[Exception], str] = {
     PrivacyViolation: "A privacy check stopped this request. Nothing was sent or saved.",
     AnonymizationError: "A privacy check stopped this request. Nothing was sent or saved.",
     RoutingError: "The AI configuration is invalid. Nothing was sent or saved.",
+    IntegrityError: "This change conflicts with the data as it is now (perhaps a change made at the same "
+    "moment). Nothing was saved; reload and try again.",
 }
 
 
