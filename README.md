@@ -179,7 +179,25 @@ question ─► permissions (404 if this counselor may not see him)
   exactly the anonymized text the coach would send anyway, so it costs no privacy; if it fails, no
   unscreened advice goes out.
 - **Measured personalization:** `python -m pacer.evaluation coach` answers each case with and without
-  the trainee's record, and a judge scores both on the same checklist.
+  the trainee's record, and a judge (Claude Sonnet) scores both on the same checklist (`coach@v1`, 9 cases):
+
+  | Claude Haiku as the coach | |
+  |---|---|
+  | the right outcome (advice, or the procedure for an exceptional incident) | 9 / 9 |
+  | items about THIS trainee met, **with** their record | **95%** |
+  | the same items, **without** it | 48% |
+  | no diagnosis, no medical labels, no treatment advice | 100% |
+  | usefulness (judge, 1-5) | 3.9 |
+  | steps grounded in the library | 0% |
+  | cost of the 9 answers | $0.02 |
+
+  Without the record, the advice for a quiet trainee is reasonable and generic; with it, it asks him to
+  prepare one point in advance (what worked with him) and warns against calling on him in front of the
+  group (what did not). Claude Sonnet scored the same and cost 16 times more, so Haiku stays.
+  **0% grounded is honest, not a bug:** no library passage was close enough to these practical questions
+  (the demo library is five classical texts), so every step is marked general advice. The first run also
+  found a real failure: Haiku sometimes added a stray key to a valid answer, which made it a 502 for 1
+  question in 9; the coach now drops keys it does not know, and a test holds it.
 
 ## Stack
 
@@ -243,5 +261,5 @@ CI runs ruff, mypy and the full suite on every pull request.
 | 2. Logic and API | services, roles, approvals, REST API, demo data, CI | done |
 | 3. AI core | LLM client, model routing, anonymization, meeting pipeline, talk summaries | done |
 | 4. Knowledge and quality | a curated library, RAG with citations, evaluation set, open vs commercial models | done |
-| 5. Counselor coach | a two-layer safety gate, the trainee's approved record, advice grounded in the library where it can be | built; its evaluation runs next |
+| 5. Counselor coach | a two-layer safety gate, the trainee's approved record, advice grounded in the library where it can be, measured | done |
 | 6. Assistant and UI | tool-using agent, staff interface, demo | planned |
