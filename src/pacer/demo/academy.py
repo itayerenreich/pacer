@@ -72,13 +72,20 @@ class Summary:
         return Counter(t.status for t in self.trainees)
 
 
-def build_academy(repos: Repos, *, seed: int = 2026, as_of: datetime | None = None) -> Summary:
-    """Create the whole academy through `repos`. The caller owns the unit of work."""
-    return _Builder(repos, random.Random(seed), as_of or datetime.now(UTC), seed).build()
+def build_academy(
+    repos: Repos, *, seed: int = 2026, as_of: datetime | None = None, schedule: bool = True
+) -> Summary:
+    """Create the whole academy through `repos`. The caller owns the unit of work.
+    schedule=False: without the weekly schedule and its ~1,700 attendance marks. For tests that do
+    not need them (most): building them before every test was half the fast suite's time."""
+    return _Builder(repos, random.Random(seed), as_of or datetime.now(UTC), seed, schedule=schedule).build()
 
 
 class _Builder:
-    def __init__(self, repos: Repos, rng: random.Random, as_of: datetime, seed: int = 2026) -> None:
+    def __init__(
+        self, repos: Repos, rng: random.Random, as_of: datetime, seed: int = 2026, *, schedule: bool = True
+    ) -> None:
+        self.schedule = schedule
         self.seed = seed  # the schedule gets its own Random(seed + 1): adding it changed nothing above
         if as_of < FIRST_DAY + timedelta(days=21):
             raise ValueError(f"as_of must be at least 3 weeks after {FIRST_DAY:%Y-%m-%d}")
@@ -128,7 +135,8 @@ class _Builder:
             self._add_goals(trainee, summary)
         self._add_approvals(summary, requests)
         self._add_notes(summary)
-        _Schedule(self.r, random.Random(self.seed + 1), self.now, cohort, summary).build()
+        if self.schedule:
+            _Schedule(self.r, random.Random(self.seed + 1), self.now, cohort, summary).build()
         return summary
 
     # --- trainees ---------------------------------------------------------------------

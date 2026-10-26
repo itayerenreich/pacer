@@ -49,7 +49,7 @@ def answer(summary: str = "סיכום קצר של הישיבה, בלי שמות 
 @pytest.fixture
 def repos():
     repos = empty_repos()
-    build_academy(repos)  # 1 רונית (manager), 2 נועה, 3 עומר, 4 שירה, 5 איתי; 35 trainees
+    build_academy(repos, schedule=False)  # 1 רונית (manager), 2 נועה, 3 עומר, 4 שירה, 5 איתי; 35 trainees
     return repos
 
 

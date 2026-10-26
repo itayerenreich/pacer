@@ -35,7 +35,7 @@ BODY = {
 class Setup:
     def __init__(self, tmp_path) -> None:
         self.repos = empty_repos()
-        build_academy(self.repos)
+        build_academy(self.repos, schedule=False)
         self.uow = FakeUnitOfWork(self.repos)
         self.cloud = FakeLLMClient(answers=[json.dumps(WEEKLY_ANSWER, ensure_ascii=False)], runs_locally=False)
 

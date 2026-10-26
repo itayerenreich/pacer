@@ -176,7 +176,7 @@ def test_services_run_on_the_demo_data(repos, summary):
 
 def test_same_seed_same_academy_other_seed_different():
     def names(seed: int) -> list[str]:
-        return [t.full_name for t in build_academy(fake_repos(), seed=seed, as_of=AS_OF).trainees]
+        return [t.full_name for t in build_academy(fake_repos(), seed=seed, as_of=AS_OF, schedule=False).trainees]
 
     assert names(2026) == names(2026)
     assert names(2026) != names(7)
@@ -184,7 +184,7 @@ def test_same_seed_same_academy_other_seed_different():
 
 def test_too_early_as_of_is_rejected():
     with pytest.raises(ValueError, match="3 weeks"):
-        build_academy(fake_repos(), as_of=datetime(2026, 9, 10, tzinfo=UTC))
+        build_academy(fake_repos(), as_of=datetime(2026, 9, 10, tzinfo=UTC), schedule=False)
 
 
 def test_a_few_trainees_have_approved_notes_for_the_coach():
@@ -195,7 +195,7 @@ def test_a_few_trainees_have_approved_notes_for_the_coach():
     from pacer.demo import content
 
     repos = empty_repos()
-    summary = build_academy(repos, as_of=datetime(2026, 10, 25, tzinfo=UTC))
+    summary = build_academy(repos, as_of=datetime(2026, 10, 25, tzinfo=UTC), schedule=False)
     by_name = {t.full_name: t for t in summary.trainees}
     assert set(content.TRAINEE_NOTES) <= set(by_name)  # every name is a real demo trainee
     for name, expected in content.TRAINEE_NOTES.items():
@@ -205,3 +205,15 @@ def test_a_few_trainees_have_approved_notes_for_the_coach():
             assert note.author_id == by_name[name].primary_counselor_id
             assert not is_sensitive(note.text) and not check_safety(note.text).is_risk, note.text
     assert summary.note_count == sum(len(v) for v in content.TRAINEE_NOTES.values())
+
+
+def test_the_schedule_is_part_of_the_demo_unless_left_out(built):
+    """The full demo (the shared fixture) has the schedule and attendance; schedule=False leaves
+    them out and changes nothing else (the schedule has its own Random)."""
+    repos, summary = built
+    assert summary.slot_count > 0 and summary.session_count > 0 and summary.attendance_count > 0
+    lean_repos = empty_repos()
+    lean = build_academy(lean_repos, as_of=AS_OF, schedule=False)
+    assert (lean.slot_count, lean.session_count, lean.attendance_count) == (0, 0, 0)
+    assert [t.full_name for t in lean.trainees] == [t.full_name for t in summary.trainees]
+    assert lean.goal_count == summary.goal_count and lean.note_count == summary.note_count
