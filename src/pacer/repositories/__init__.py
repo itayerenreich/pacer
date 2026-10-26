@@ -11,11 +11,15 @@ from .interfaces import ScoredChunk
 from .library import ChunkRepository, KnowledgeSourceRepository
 from .meeting import MeetingRepository, ProposedTaskRepository, TaskRepository
 from .repos import Repos, UnitOfWork, repositories
+from .schedule import AttendanceRepository, ScheduledSessionRepository, ScheduleSlotRepository
 from .staff import StaffRepository
 from .talk import PersonalTalkRepository, TalkProposalRepository, TraineeNoteRepository
 from .trainee import PersonalFileRepository, TraineeRepository
 
 __all__ = [
+    "AttendanceRepository",
+    "ScheduledSessionRepository",
+    "ScheduleSlotRepository",
     "ChunkRepository",
     "KnowledgeSourceRepository",
     "ScoredChunk",

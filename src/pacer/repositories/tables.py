@@ -4,7 +4,7 @@ These classes describe tables, not business rules. The rules live in the
 domain layer; repositories translate between domain models and these rows.
 """
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
@@ -273,3 +273,56 @@ class ChunkEmbeddingRow(Base):
     chunk_id: Mapped[int] = mapped_column(ForeignKey("chunks.id", ondelete="CASCADE"), primary_key=True)
     model: Mapped[str] = mapped_column(String(100), primary_key=True)
     embedding: Mapped[list[float]] = mapped_column(Vector())
+
+
+# --- the weekly schedule and attendance ------------------------------------------------------------
+
+
+class ScheduleSlotRow(Base):
+    __tablename__ = "schedule_slots"
+    __table_args__ = (CheckConstraint("end_time > start_time", name="ck_schedule_slots_times"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cohort_id: Mapped[int] = mapped_column(ForeignKey("cohorts.id"), index=True)
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id"))
+    weekday: Mapped[int]
+    start: Mapped[time] = mapped_column("start_time")
+    end: Mapped[time] = mapped_column("end_time")
+    title: Mapped[str] = mapped_column(String(100))
+    active: Mapped[bool] = mapped_column(Boolean)
+
+
+class ScheduledSessionRow(Base):
+    __tablename__ = "scheduled_sessions"
+    __table_args__ = (
+        CheckConstraint("end_time > start_time", name="ck_scheduled_sessions_times"),
+        # A template slot happens once a week: publishing the same week twice adds nothing.
+        UniqueConstraint("slot_id", "session_date", name="uq_scheduled_sessions_slot_date"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    cohort_id: Mapped[int] = mapped_column(ForeignKey("cohorts.id"))
+    group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id"))
+    on: Mapped[date] = mapped_column("session_date", index=True)  # "on" is a reserved word in SQL
+    start: Mapped[time] = mapped_column("start_time")
+    end: Mapped[time] = mapped_column("end_time")
+    title: Mapped[str] = mapped_column(String(100))
+    # SET NULL: a template slot that is deleted leaves its past weeks as they were
+    slot_id: Mapped[int | None] = mapped_column(ForeignKey("schedule_slots.id", ondelete="SET NULL"))
+    cancelled: Mapped[bool] = mapped_column(Boolean)
+
+
+class AttendanceRow(Base):
+    __tablename__ = "attendance"
+    __table_args__ = (
+        UniqueConstraint("session_id", "trainee_id", name="uq_attendance_session_trainee"),
+        CheckConstraint("status IN ('present', 'absent', 'excused')", name="ck_attendance_status"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[int] = mapped_column(ForeignKey("scheduled_sessions.id", ondelete="CASCADE"))
+    trainee_id: Mapped[int] = mapped_column(ForeignKey("trainees.id"), index=True)
+    status: Mapped[str] = mapped_column(String(10))
+    recorded_by_id: Mapped[int] = mapped_column(ForeignKey("staff_members.id"))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
