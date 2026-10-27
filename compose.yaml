@@ -10,6 +10,32 @@ services:
       - "5432:5432"
     volumes:
       - pacer-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # The whole app in one container (stage 6). A profile, so `docker compose up -d` still starts only the
+  # database, as in development. With it: docker compose --profile app up -d --build
+  app:
+    profiles: ["app"]
+    build: .
+    container_name: pacer-app
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      # Ollama (the embedding model of the library) runs on the computer itself, not in a container.
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

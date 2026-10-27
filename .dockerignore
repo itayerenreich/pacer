@@ -1,0 +1,16 @@
+.git
+.github
+.venv
+.env
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.vscode
+**/__pycache__
+data
+tests
+evals
+library
+web/node_modules
+web/dist
+web/*.tsbuildinfo
