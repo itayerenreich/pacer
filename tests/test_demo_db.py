@@ -59,3 +59,26 @@ def test_the_api_serves_the_demo_academy(engine):
     assert (len(everyone), len(active)) == (35, 33)
     assert 0 < len(noa) < 35 and {t["group_id"] for t in noa} == {summary.groups[0].id}  # her group only
     assert trainee["first_name"] == summary.trainees[0].first_name  # Hebrew survives the round trip
+
+
+def test_reset_keeps_the_library(engine):
+    """The library is imported from the academy's files and indexed for minutes: not demo data. Found
+    2026-10-27, when a reset emptied it and every library question got "no source"."""
+    from pacer.domain import Chunk, EvidenceLevel, KnowledgeSource, SourceKind, SourceLicense
+    from pacer.repositories import repositories
+
+    load(engine, reset=False, seed=2026)
+    with repositories(engine) as repos:
+        source = repos.sources.add(
+            KnowledgeSource(
+                title="איגרת הרמב\"ן",
+                kind=SourceKind.CLASSIC,
+                evidence_level=EvidenceLevel.TRADITION,
+                license=SourceLicense.PUBLIC_DOMAIN,
+            )
+        )
+        repos.chunks.add_many([Chunk(source_id=source.key, chunking="fixed-200-40", ordinal=0, text="תתנהג תמיד לדבר כל דבריך בנחת")])
+    load(engine, reset=True, seed=2026)
+    with repositories(engine) as repos:
+        assert [s.title for s in repos.sources.list_all()] == ["איגרת הרמב\"ן"]
+    assert count(engine, TraineeRow) == 35  # the academy itself was replaced
