@@ -11,11 +11,12 @@ from fastapi import FastAPI
 from pacer.logging_config import configure_logging
 
 from .errors import register_error_handlers
-from .routers import approvals, coach, goals, library, me, meetings, schedule, talks, tasks, trainees
+from .routers import agent, approvals, coach, goals, library, me, meetings, schedule, talks, tasks, trainees
 
 DESCRIPTION = """
 Staff API for a pre-military academy: trainees, goals and progress, approvals, staff meetings and tasks,
-personal talks and trainee notes, and questions answered from the knowledge library.
+personal talks and trainee notes, the weekly schedule and attendance, questions answered from the
+knowledge library, the counselor coach, and an assistant that answers by calling all of these.
 
 **Who are you?** Send the `X-Staff-Id` header with a staff member's id
 (development only, see `api/dependencies.py`). In these docs: fill it in per request.
@@ -27,7 +28,7 @@ def create_app() -> FastAPI:
     configure_logging()
     app = FastAPI(title="Pacer API", version="0.1.0", description=DESCRIPTION)
     register_error_handlers(app)
-    for module in (me, trainees, goals, approvals, meetings, tasks, talks, schedule, library, coach):
+    for module in (me, trainees, goals, approvals, meetings, tasks, talks, schedule, library, coach, agent):
         app.include_router(module.router)
     return app
 
