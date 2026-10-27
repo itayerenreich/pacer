@@ -19,9 +19,10 @@ from .approvals import ApprovalService
 from .coach_context import CoachContextService, GoalContext, TraineeContext
 from .errors import NotFoundError, PermissionDeniedError, RuleViolationError, ServiceError
 from .goals import GoalService
-from .meetings import MeetingService, ProposalEdits, TaskDraft, TaskService
+from .meetings import MeetingService, ProposalEdits, TaskDraft
 from .schedule import AttendanceService, AttendanceSummary, Mark, ScheduleService, SheetRow
 from .talks import TalkDraft, TalkProposalEdits, TalkService
+from .tasks import TaskService
 from .trainees import TraineeService
 
 __all__ = [

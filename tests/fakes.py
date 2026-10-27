@@ -160,8 +160,14 @@ class FakeTaskRepo(_Store[Task]):
     def list_by_owner(self, owner_id: int) -> list[Task]:
         return self.where(owner_id=owner_id)
 
+    def list_by_trainee(self, trainee_id: int) -> list[Task]:
+        return self.where(trainee_id=trainee_id)
+
     def list_all(self) -> list[Task]:
         return self.where()
+
+    def delete(self, task_id: int) -> None:
+        self.rows.pop(task_id, None)
 
 
 class FakeTalkRepo(_Store[PersonalTalk]):

@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 
 import pacer.maintenance.__main__ as maintenance
 from pacer.demo.__main__ import load
-from pacer.domain import NoteKind, PersonalTalk, TalkProposal, TalkProposalKind, TraineeNote, TraineeStatus
+from pacer.domain import NoteKind, PersonalTalk, TalkProposal, TalkProposalKind, Task, TraineeNote, TraineeStatus
 from pacer.repositories import repositories
 
 pytestmark = pytest.mark.integration
@@ -44,10 +44,12 @@ def test_purge_notes_shows_first_and_deletes_only_with_yes(engine, academy, caps
         repos.notes.add(TraineeNote(trainee_id=trainee.key, kind=NoteKind.OBSERVATION, text="מוביל שיחות בקבוצה", author_id=1))
         talk = repos.talks.add(PersonalTalk(trainee_id=trainee.key, counselor_id=2, held_on=date(2026, 9, 1), notes="שיחה על הקבוצה ועל מה שעבד השבוע."))
         repos.talk_proposals.add(TalkProposal(talk_id=talk.key, kind=TalkProposalKind.NOTE, note_kind=NoteKind.OBSERVATION, text="לזכור את זה"))
+        repos.tasks.add(Task(description="לדבר איתו על החזרה הביתה", owner_id=2, created_by_id=2, trainee_id=trainee.key))
+        tasks_before = len(repos.tasks.list_all())
     later = trainee.closed_at + timedelta(days=400)
 
     maintenance.main(["purge-notes"], now=later)
-    assert "1 notes and 1 talks of 1 trainees" in capsys.readouterr().out
+    assert "1 notes, 1 talks and 1 tasks of 1 trainees" in capsys.readouterr().out
     demo = academy.note_count  # the demo's own notes belong to active trainees: never purged
     assert count(engine, "trainee_notes") == demo + 1  # only shown
 
@@ -55,13 +57,14 @@ def test_purge_notes_shows_first_and_deletes_only_with_yes(engine, academy, caps
     assert count(engine, "trainee_notes") == demo + 1  # within a longer period: kept
 
     maintenance.main(["purge-notes", "--yes"], now=later)
-    assert "Deleted 1 notes and 1 talks." in capsys.readouterr().out
+    assert "Deleted 1 notes, 1 talks and 1 tasks." in capsys.readouterr().out
     assert (count(engine, "trainee_notes"), count(engine, "personal_talks"), count(engine, "talk_proposals")) == (demo, 0, 0)
+    assert count(engine, "tasks") == tasks_before - 1  # the task about him; every other task stays
 
 
 def test_purge_with_nothing_to_delete_says_so(engine, academy, capsys):
     maintenance.main(["purge-notes", "--yes"], now=datetime.now(UTC))
-    assert "0 notes and 0 talks" in capsys.readouterr().out
+    assert "0 notes, 0 talks and 0 tasks" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("days", ["-1", "1000000"])

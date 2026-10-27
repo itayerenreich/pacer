@@ -236,3 +236,16 @@ ABSENCE_BY_TRAINEE: dict[str, dict[str | None, float]] = {
     "איתמר סויסה": {"שיעור עיון": 0.3},
 }
 ATTENDANCE_WEEKS = 3  # weeks of attendance before the demo's "now", plus the current week so far
+
+# Tasks written by hand (2026-10-27). (owner, written by, task, deadline in days from today or None, the
+# trainee it is about or None, done?). A few match the approved notes above, as a counselor would write them.
+TASKS: list[tuple[str, str, str, int | None, str | None, bool]] = [
+    ("נועה לוי", "נועה לוי", "לבדוק עם נדב הררי אם ירצה להוביל חלק קטן משיחת הקבוצה הבאה", 1, "נדב הררי", False),
+    ("נועה לוי", "נועה לוי", "לשבת עם בן שפירא על תפקיד אחראי הציוד לבוקר, לפני שהוא נגמר", -1, "בן שפירא", False),
+    ("נועה לוי", "רונית שמעוני", "להגיש סיכום נוכחות חודשי של קבוצת ארז", 6, None, False),
+    ("נועה לוי", "נועה לוי", "להכין שאלה פתוחה בכתב לשיחת הקבוצה של יום שני", 3, None, False),
+    ("נועה לוי", "נועה לוי", "להחזיר את טופסי האישור לטיול למזכירות", None, None, True),
+    ("עומר כהן", "רונית שמעוני", "לתאם את ההסעות לטיול השנתי", 10, None, False),
+    ("שירה אברהם", "שירה אברהם", "לבדוק עם טליה חדד אם הכללים בחדר עדיין מחזיקים אחרי החופשה", 2, "טליה חדד", False),
+    ("רונית שמעוני", "רונית שמעוני", "להיפגש עם ועד ההורים לקראת סוף המחצית", 4, None, False),
+]

@@ -69,11 +69,11 @@ def close(world: World, at: datetime) -> None:
 
 
 def plan_for(world: World, now: datetime = NOW, keep_for: timedelta = DEFAULT_KEEP_FOR):
-    return past_retention(world.trainees, world.notes, world.talks, now=now, keep_for=keep_for)
+    return past_retention(world.trainees, world.notes, world.talks, world.tasks, now=now, keep_for=keep_for)
 
 
 def run_purge(world: World, plan, now: datetime = NOW):
-    return purge(world.trainees, world.notes, world.talks, plan, now=now)
+    return purge(world.trainees, world.notes, world.talks, world.tasks, plan, now=now)
 
 
 def test_an_open_file_is_never_purged(world):
@@ -128,3 +128,14 @@ def test_both_ways_to_change_a_status_close_the_file(world, path):
         request = approvals.request(world.noa, ApprovalKind.STATUS_CHANGE, world.yael.id, "עזבה", Status.LEFT)
         approvals.approve(world.manager, request.key)
     assert world.trainees.get(world.yael.id).closed_at is not None
+
+
+def test_the_tasks_about_the_trainee_go_too_and_every_other_task_stays(world):
+    from pacer.domain import Task
+
+    about = world.tasks.add(Task(description="לדבר איתה על החזרה הביתה", owner_id=world.noa.id, created_by_id=world.noa.id, trainee_id=world.yael.id))
+    other = world.tasks.add(Task(description="להכין את הטיול השנתי", owner_id=world.noa.id, created_by_id=world.noa.id))
+    close(world, at=NOW - DEFAULT_KEEP_FOR - timedelta(days=1))
+    done = run_purge(world, plan_for(world))
+    assert done.tasks_by_trainee == {world.yael.id: [about.key]}
+    assert world.tasks.get(about.key) is None and world.tasks.get(other.key) is not None

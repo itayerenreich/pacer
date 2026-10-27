@@ -3,7 +3,7 @@
 Who may do what:
     Manager      creates meetings, reviews proposals (approve, edit then approve, reject),
                  sees every task.
-    Staff member sees the tasks they own and marks them done. Never sees proposals or transcripts.
+    Staff member never sees proposals or transcripts. The tasks themselves: services/tasks.py.
 
 The AI pipeline (task 6) calls submit_proposals() after it has validated the model's answer.
 From that moment nothing becomes a real Task without a manager's decision.
@@ -33,7 +33,6 @@ from pacer.repositories.interfaces import (
 
 from .errors import RuleViolationError, found
 from .permissions import is_manager, require
-from .visibility import hidden
 
 log = logging.getLogger(__name__)
 
@@ -188,23 +187,3 @@ class MeetingService:
         if meeting.status is MeetingStatus.PENDING_APPROVAL and self._proposals.count_open(meeting_id) == 0:
             self._meetings.update(meeting.advance(MeetingStatus.APPROVED))
             log.info("Meeting %s: every proposal decided", meeting_id)
-
-
-class TaskService:
-    def __init__(self, tasks: TaskRepo) -> None:
-        self._tasks = tasks
-
-    def my_tasks(self, actor: StaffMember) -> list[Task]:
-        return self._tasks.list_by_owner(actor.key)
-
-    def all_tasks(self, actor: StaffMember) -> list[Task]:
-        require(is_manager(actor), "view everyone's tasks")
-        return self._tasks.list_all()
-
-    def complete(self, actor: StaffMember, task_id: int) -> Task:
-        task = found(self._tasks.get(task_id), "Task", task_id)
-        if task.owner_id != actor.id and not is_manager(actor):
-            raise hidden("Task", task_id)  # a counselor sees only their own tasks: someone else's is a 404
-        done = self._tasks.update(task.complete())  # InvalidTransition if already done
-        log.info("Task %s completed by staff %s", task_id, actor.id)
-        return done

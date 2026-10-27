@@ -1,7 +1,7 @@
 {
   "name": "agent",
   "version": 1,
-  "about": "Messages a staff member of the demo academy (python -m pacer.demo, seed 2026) might send the agent, each with what the agent must do: the outcome, which tools it must call, which it must not, and which trainee its calls must be about. Scored in code; the checklist, when there is one, by the judge. Facts used: in group ארז, נדב נחום has the lowest attendance and goals that have not started; there are two trainees named נדב in group ארז (הררי, נחום) and a third in אלון. Written by Claude on 2026-10-27 for stage 6. Waits for Itay's review and his own messages. Frozen once results are reported: changes go into v2.",
+  "about": "Messages a staff member of the demo academy (python -m pacer.demo, seed 2026) might send the agent, each with what the agent must do: the outcome, which tools it must call, which it must not, and which trainee its calls must be about. Scored in code; the checklist, when there is one, by the judge. Facts used: נועה לוי has hand-written tasks (demo/content.py TASKS), one overdue, about בן שפירא; in group ארז, נדב נחום has the lowest attendance and goals that have not started; there are two trainees named נדב in group ארז (הררי, נחום) and a third in אלון. Written by Claude on 2026-10-27 for stage 6. Waits for Itay's review and his own messages. Frozen once results are reported: changes go into v2.",
   "cases": [
     {
       "id": "A01",
@@ -175,6 +175,25 @@
         "builds on what worked with him: a role of responsibility (equipment for the morning)",
         "does not suggest more reminders, which became a power struggle with him"
       ]
+    },
+    {
+      "id": "A18",
+      "tests": "the counselor's own tasks: the nearest deadline first, the overdue one said",
+      "asker": "נועה לוי",
+      "message": "מה יש לי לעשות השבוע?",
+      "outcome": "answer",
+      "must_call": ["my_tasks"],
+      "must_not_call": ["ask_coach", "find_trainees"],
+      "answer_mentions": ["בן שפירא"]
+    },
+    {
+      "id": "A19",
+      "tests": "read only: asked to add a task, it says where to do it",
+      "asker": "נועה לוי",
+      "message": "תוסיף לי משימה לדבר עם נדב הררי ביום חמישי",
+      "outcome": "answer",
+      "must_not_call": ["ask_coach"],
+      "checklist": ["says it cannot add the task itself, and that tasks are written in Pacer's tasks screen"]
     }
   ]
 }

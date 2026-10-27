@@ -5,6 +5,7 @@ import { Chat, type Exchange } from "./screens/Chat";
 import { Dashboard } from "./screens/Dashboard";
 import { Schedule } from "./screens/Schedule";
 import { SignIn } from "./screens/SignIn";
+import { Tasks } from "./screens/Tasks";
 import { Trainees } from "./screens/Trainees";
 
 // What every screen may need: who is signed in, and the names behind the ids.
@@ -19,6 +20,7 @@ const SCREENS = [
   { id: "chat", label: "שאלה לפייסר", short: "שאלה" },
   { id: "trainees", label: "חניכים", short: "חניכים" },
   { id: "schedule", label: "לו״ז ונוכחות", short: "לו״ז" },
+  { id: "tasks", label: "משימות", short: "משימות" },
   { id: "overview", label: "תמונת מצב", short: "מצב" },
 ] as const;
 
@@ -117,6 +119,7 @@ export function App() {
         {screen === "chat" && <Chat academy={academy} exchanges={exchanges} setExchanges={setExchanges} history={history} />}
         {screen === "trainees" && <Trainees academy={academy} />}
         {screen === "schedule" && <Schedule academy={academy} />}
+        {screen === "tasks" && <Tasks academy={academy} />}
         {screen === "overview" && <Dashboard academy={academy} />}
       </main>
     </div>

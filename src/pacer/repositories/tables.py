@@ -180,6 +180,7 @@ class TaskRow(Base):
     status: Mapped[str] = mapped_column(String(20))
     created_by_id: Mapped[int] = mapped_column(ForeignKey("staff_members.id"))
     source_meeting_id: Mapped[int | None] = mapped_column(ForeignKey("staff_meetings.id"), index=True)
+    trainee_id: Mapped[int | None] = mapped_column(ForeignKey("trainees.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

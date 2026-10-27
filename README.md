@@ -256,15 +256,21 @@ message ─► phrase list (every user turn) ─► the screen ─► exceptiona
   server checks it with the phrase list and anonymizes it again every time, as untrusted text.
 - **What was looked up is shown.** Under each answer, the route the agent took: each tool call as a
   waypoint, with counts (never content), and the library sources it was shown.
-- **Measured like the rest:** `python -m pacer.evaluation agent` runs 17 cases (`evals/agent-v1.json`) and
+- **Measured like the rest:** `python -m pacer.evaluation agent` runs 19 cases (`evals/agent-v1.json`) and
   checks in code the outcome, the tools it had to call and must not call, that every call was about the
   right trainee, and the answer's text; a judge scores the checklists. Only the agent's model changes
   between runs (`--model`), so Haiku and Sonnet are compared on choosing tools.
 
-The interface (`web/`, React + TypeScript + Vite) has four screens: the assistant, the trainees (goals,
-approved notes, attendance), the week with attendance marking, and an overview (attendance by group and by
-trainee, the lowest first; approvals waiting for the manager; tasks). It talks only to the API, so every
-permission is the API's.
+The interface (`web/`, React + TypeScript + Vite) has five screens: the assistant, the trainees (goals,
+approved notes, attendance, open tasks), the week with attendance marking, tasks, and an overview
+(attendance by group and by trainee, the lowest first; approvals waiting for the manager). It talks only
+to the API, so every permission is the API's.
+
+**Tasks** come from staff meetings (the manager approves each one) or are written by hand: each staff
+member writes their own, the manager writes for anyone. A task may have a deadline (never in the past) and
+may be about a trainee, and then it shows in their profile; both the writer and the owner must be allowed
+to see that trainee. A meeting's task is never deleted, only marked done, and a closed trainee's tasks
+are deleted with their notes when the retention period ends. The agent reads them (`my_tasks`).
 
 ## Stack
 
@@ -311,7 +317,7 @@ uv run python -m pacer.library ask "איך מתאימים את ההדרכה לח
 uv run python -m pacer.evaluation run --limit 1 --out data/eval-try.md   # the evaluation, on one case
 uv run python -m pacer.demo.coach "נדב הררי" "איך לעזור לו להשתתף יותר בשיחות הקבוצה?"         # dry run
 uv run python -m pacer.demo.coach "נדב הררי" "איך לעזור לו להשתתף יותר בשיחות הקבוצה?" --send  # the coach
-uv run python -m pacer.evaluation agent --out data/agent-haiku.md   # the agent on its 17 cases (about $0.30)
+uv run python -m pacer.evaluation agent --out data/agent-haiku.md   # the agent on its 19 cases (about $0.30)
 ```
 
 The library needs [Ollama](https://ollama.com) with `ollama pull bge-m3`, and the texts imported

@@ -5,7 +5,8 @@ notes, talks or progress can be added. After a period the academy sets, what was
 them in private is deleted:
 * their notes (TraineeNote, the long-term memory), and
 * their personal talks (the counselor's raw notes, what was sent to the model, the summary) with
-  every proposal made from them.
+  every proposal made from them, and
+* the tasks about them (2026-10-27): "talk to Nadav about home" is written about him, in private.
 Goal progress stays: it is the academy's record of the year, and its reasons were checked for
 health details when they came from the AI.
 
@@ -17,7 +18,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from pacer.repositories.interfaces import PersonalTalkRepo, TraineeNoteRepo, TraineeRepo
+from pacer.repositories.interfaces import PersonalTalkRepo, TaskRepo, TraineeNoteRepo, TraineeRepo
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +32,7 @@ class PurgePlan:
 
     notes_by_trainee: dict[int, list[int]] = field(default_factory=dict)
     talks_by_trainee: dict[int, list[int]] = field(default_factory=dict)
+    tasks_by_trainee: dict[int, list[int]] = field(default_factory=dict)
 
     @property
     def note_count(self) -> int:
@@ -41,8 +43,12 @@ class PurgePlan:
         return sum(len(ids) for ids in self.talks_by_trainee.values())
 
     @property
+    def task_count(self) -> int:
+        return sum(len(ids) for ids in self.tasks_by_trainee.values())
+
+    @property
     def trainee_ids(self) -> set[int]:
-        return set(self.notes_by_trainee) | set(self.talks_by_trainee)
+        return set(self.notes_by_trainee) | set(self.talks_by_trainee) | set(self.tasks_by_trainee)
 
 
 def _cutoff(now: datetime, keep_for: timedelta) -> datetime:
@@ -55,11 +61,12 @@ def past_retention(
     trainees: TraineeRepo,
     notes: TraineeNoteRepo,
     talks: PersonalTalkRepo,
+    tasks: TaskRepo,
     *,
     now: datetime,
     keep_for: timedelta = DEFAULT_KEEP_FOR,
 ) -> PurgePlan:
-    """The notes and talks of every trainee whose file was closed more than keep_for before now.
+    """The notes, talks and tasks of every trainee whose file was closed more than keep_for before now.
     A file closed exactly keep_for ago is still kept: the period has to be OVER."""
     cutoff = _cutoff(now, keep_for)
     plan = PurgePlan()
@@ -70,6 +77,8 @@ def past_retention(
             plan.notes_by_trainee[trainee.key] = note_ids
         if talk_ids := [talk.key for talk in talks.list_by_trainee(trainee.key)]:
             plan.talks_by_trainee[trainee.key] = talk_ids
+        if task_ids := [task.key for task in tasks.list_by_trainee(trainee.key)]:
+            plan.tasks_by_trainee[trainee.key] = task_ids
     return plan
 
 
@@ -77,6 +86,7 @@ def purge(
     trainees: TraineeRepo,
     notes: TraineeNoteRepo,
     talks: PersonalTalkRepo,
+    tasks: TaskRepo,
     plan: PurgePlan,
     *,
     now: datetime,
@@ -96,14 +106,20 @@ def purge(
             notes.delete(note_id)
         for talk_id in plan.talks_by_trainee.get(trainee_id, []):
             talks.delete_with_proposals(talk_id)
-        if trainee_id in plan.notes_by_trainee:
-            done.notes_by_trainee[trainee_id] = plan.notes_by_trainee[trainee_id]
-        if trainee_id in plan.talks_by_trainee:
-            done.talks_by_trainee[trainee_id] = plan.talks_by_trainee[trainee_id]
+        for task_id in plan.tasks_by_trainee.get(trainee_id, []):
+            tasks.delete(task_id)
+        for planned, deleted in (
+            (plan.notes_by_trainee, done.notes_by_trainee),
+            (plan.talks_by_trainee, done.talks_by_trainee),
+            (plan.tasks_by_trainee, done.tasks_by_trainee),
+        ):
+            if trainee_id in planned:
+                deleted[trainee_id] = planned[trainee_id]
         log.info(
-            "Trainee %s: %s notes and %s talks deleted (retention period over)",
+            "Trainee %s: %s notes, %s talks and %s tasks deleted (retention period over)",
             trainee_id,
             len(done.notes_by_trainee.get(trainee_id, [])),
             len(done.talks_by_trainee.get(trainee_id, [])),
+            len(done.tasks_by_trainee.get(trainee_id, [])),
         )
     return done

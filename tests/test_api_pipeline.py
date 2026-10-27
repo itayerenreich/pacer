@@ -14,10 +14,12 @@ from pacer.api.app import create_app
 from pacer.api.dependencies import (
     get_ai_router,
     get_db_engine,
+    get_group_repository,
     get_meeting_repository,
     get_proposal_repository,
     get_staff_repository,
     get_task_repository,
+    get_trainee_repository,
     get_unit_of_work,
 )
 from pacer.demo import build_academy
@@ -60,6 +62,8 @@ def client(setup) -> Iterator[TestClient]:
         get_meeting_repository: lambda: setup.repos.meetings,
         get_proposal_repository: lambda: setup.repos.proposals,
         get_task_repository: lambda: setup.repos.tasks,
+        get_trainee_repository: lambda: setup.repos.trainees,
+        get_group_repository: lambda: setup.repos.groups,
     }
     with TestClient(app) as test_client:
         yield test_client

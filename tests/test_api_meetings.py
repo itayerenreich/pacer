@@ -9,10 +9,12 @@ from fastapi.testclient import TestClient
 from pacer.api.app import create_app
 from pacer.api.dependencies import (
     get_db_engine,
+    get_group_repository,
     get_meeting_repository,
     get_proposal_repository,
     get_staff_repository,
     get_task_repository,
+    get_trainee_repository,
 )
 from pacer.domain import MeetingStatus, StaffMember
 from pacer.services import MeetingService, TaskDraft
@@ -42,6 +44,8 @@ def client(world) -> Iterator[TestClient]:
         get_meeting_repository: lambda: world.meetings,
         get_proposal_repository: lambda: world.proposals,
         get_task_repository: lambda: world.tasks,
+        get_trainee_repository: lambda: world.trainees,
+        get_group_repository: lambda: world.groups,
     }
     with TestClient(app) as test_client:
         yield test_client

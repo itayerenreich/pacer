@@ -86,8 +86,20 @@ export interface Approval {
 export interface Task {
   id: number;
   description: string;
+  owner_id: number;
   due_date: string | null;
-  status: string;
+  status: "open" | "done";
+  created_by_id: number;
+  source_meeting_id: number | null;
+  trainee_id: number | null;
+  completed_at: string | null;
+}
+
+export interface NewTask {
+  description: string;
+  due_date?: string | null;
+  owner_id?: number | null;
+  trainee_id?: number | null;
 }
 
 export interface Referral {
@@ -179,6 +191,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     }
     throw new ApiError(response.status, detail);
   }
+  if (response.status === 204) return undefined as T; // deleted: no body
   return (await response.json()) as T;
 }
 
@@ -195,6 +208,13 @@ export const api = {
   mark: (sessionId: number, marks: { trainee_id: number; status: Mark }[]) =>
     request<Sheet>("PUT", `/schedule/sessions/${sessionId}/attendance`, { marks }),
   pendingApprovals: () => request<Approval[]>("GET", "/approvals/pending"),
+  staff: () => request<Staff[]>("GET", "/staff"),
   myTasks: () => request<Task[]>("GET", "/tasks/mine"),
+  allTasks: () => request<Task[]>("GET", "/tasks"),
+  traineeTasks: (id: number) => request<Task[]>("GET", `/trainees/${id}/tasks`),
+  createTask: (task: NewTask) => request<Task>("POST", "/tasks", task),
+  completeTask: (id: number) => request<Task>("POST", `/tasks/${id}/complete`),
+  rescheduleTask: (id: number, dueDate: string | null) => request<Task>("PATCH", `/tasks/${id}`, { due_date: dueDate }),
+  deleteTask: (id: number) => request<void>("DELETE", `/tasks/${id}`),
   chat: (message: string, history: Turn[]) => request<AgentAnswer>("POST", "/agent/chat", { message, history }),
 };
