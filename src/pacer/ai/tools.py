@@ -58,6 +58,7 @@ TOOL_NAMES = (
 )  # every tool, in the order the model sees them (a test keeps this equal to the registry)
 MAX_RESULT_CHARS = 6000  # a tool's result is cut here: the model reads summaries, not databases
 MAX_TRAINEES_LISTED = 40
+MAX_WEEKS_AWAY = 52  # week_schedule: a day further than this from today is a mistake, not a question
 
 
 @dataclass(frozen=True)
@@ -73,7 +74,7 @@ class SourceRef:
 @dataclass
 class ToolOutput:
     text: str  # with names: anonymized by the agent before any model reads it
-    summary: str  # for the trace the counselor sees: counts and ids only, never names or content
+    summary: str  # for the trace the counselor sees, in Hebrew: counts and ids only, never names or content
     about: list[Person] = field(default_factory=list)  # who it is about: an ambiguous first name is them
     sources: list[SourceRef] = field(default_factory=list)
     stop: Referral | None = None  # an exceptional incident: the conversation ends with the procedure
@@ -82,11 +83,14 @@ class ToolOutput:
 
 @dataclass(frozen=True)
 class ToolContext:
-    """What every tool run gets. The actor comes from the request, never from the model."""
+    """What every tool run gets. The actor comes from the request, never from the model.
+    name_for: how a token in the model's arguments is written back for the tool: the same rule as the
+    answer, so a tool never learns a name the asker could not see (review, 2026-10-27)."""
 
     actor: StaffMember
     session: AnonymizationSession
     today: date
+    name_for: Callable[[Person], str] | None = None
 
 
 @dataclass(frozen=True)
@@ -115,7 +119,7 @@ class ToolRun:
     """One tool call as it happened: what the agent sends back to the model, and what the trace shows."""
 
     name: str
-    arguments: dict[str, Any]  # as the model wrote them (tokens, not names)
+    arguments: dict[str, Any]  # validated (names as the asker may see them), or as written if they were not
     ok: bool
     output: ToolOutput
     latency_ms: int
@@ -152,36 +156,44 @@ class ToolRegistry:
                 raise ToolError("The arguments must be a JSON object")
             parsed = loaded
             try:
-                params = tool.params.model_validate(_restore_names(parsed, context.session))
+                params = tool.params.model_validate(_restore_names(parsed, context))
             except ValidationError as error:
                 raise ToolError(_validation_message(error)) from error
+            parsed = params.model_dump(mode="json", exclude_none=True)
             output, ok = tool.run(context, params), True
             output.text = _cut(output.text)
         except ToolError as error:
-            output, ok = ToolOutput(f"Error: {error}", "error"), False
+            output, ok = ToolOutput(f"Error: {error}", "שגיאה בבקשה"), False
         except NotFoundError:
             # The same words whether the record does not exist or is not this actor's: nothing leaks.
-            output, ok = ToolOutput("Error: not found (it does not exist, or is not yours to see)", "not found"), False
+            output, ok = ToolOutput("Error: not found (it does not exist, or is not yours to see)", "לא נמצא"), False
         except (PermissionDeniedError, RuleViolationError, DomainRuleError) as error:
-            output, ok = ToolOutput(f"Error: {error}", "refused"), False
+            output, ok = ToolOutput(f"Error: {error}", "לא אפשרי"), False
+        except (ValueError, OverflowError) as error:
+            # A last resort: arguments that passed validation but that the code below still refuses.
+            log.warning("Tool %s refused its arguments: %s", name, type(error).__name__)
+            output, ok = (
+                ToolOutput("Error: these arguments cannot be used. Check them, or answer without it.", "שגיאה בבקשה"),
+                False,
+            )
         except LLMError as error:
             log.warning("Tool %s: a model it needs failed: %s", name, type(error).__name__)
             output, ok = (
-                ToolOutput("Error: this tool is unavailable right now. Answer without it.", "unavailable"),
+                ToolOutput("Error: this tool is unavailable right now. Answer without it.", "לא זמין כרגע"),
                 False,
             )
         log.info("Tool %s: ok=%s by staff %s", name, ok, context.actor.id)  # never the arguments or the result
         return ToolRun(name, parsed, ok, output, round((time.perf_counter() - started) * 1000))
 
 
-def _restore_names(value: Any, session: AnonymizationSession) -> Any:
+def _restore_names(value: Any, context: ToolContext) -> Any:
     """The model writes tokens ("[TRAINEE_7]", "[NAME_1]"); the tools run on this computer, with names."""
     if isinstance(value, str):
-        return deanonymize(value, session.view())
+        return deanonymize(value, context.session.view(), context.name_for)
     if isinstance(value, list):
-        return [_restore_names(v, session) for v in value]
+        return [_restore_names(v, context) for v in value]
     if isinstance(value, dict):
-        return {k: _restore_names(v, session) for k, v in value.items()}
+        return {k: _restore_names(v, context) for k, v in value.items()}
     return value
 
 
@@ -201,7 +213,8 @@ def _cut(text: str) -> str:
 
 
 class _Params(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # Whitespace stripped before the length rules: "     " is not a five-letter question (review, 2026-10-27).
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
 TRAINEE_ID = Field(description="The number inside the trainee's token: [TRAINEE_7] -> 7", ge=1)
@@ -326,7 +339,7 @@ class AgentTools:
             trainees = [t for t in trainees if _matches(t, wanted)]
         trainees.sort(key=lambda t: (t.status is not TraineeStatus.ACTIVE, t.key))
         if not trainees:
-            return ToolOutput("No trainee you may see matches.", "0 trainees")
+            return ToolOutput("No trainee you may see matches.", "אין התאמה")
         lines = [f"{len(trainees)} trainee(s):"]
         for t in trainees[:MAX_TRAINEES_LISTED]:
             lines.append(
@@ -336,7 +349,7 @@ class AgentTools:
         if len(trainees) > MAX_TRAINEES_LISTED:
             lines.append(f"(and {len(trainees) - MAX_TRAINEES_LISTED} more)")
         about = [_person(t) for t in trainees[:MAX_TRAINEES_LISTED]]
-        return ToolOutput("\n".join(lines), f"{len(trainees)} trainees", about=about)
+        return ToolOutput("\n".join(lines), _trainees(len(trainees)), about=about)
 
     def trainee_record(self, ctx: ToolContext, p: TraineeRecord) -> ToolOutput:
         with self._uow() as repos:
@@ -350,7 +363,7 @@ class AgentTools:
                 repos.attendance,
             ).build(ctx.actor, p.trainee_id, today=ctx.today)
         lines = [f"trainee_id {context.trainee.key}", *trainee_lines(context)]
-        summary = f"trainee {p.trainee_id}: {len(context.goals)} goals, {len(context.notes)} notes"
+        summary = f"{len(context.goals)} מטרות, {len(context.notes)} הערות"
         return ToolOutput("\n".join(lines), summary, about=[_person(context.trainee)])
 
     def attendance(self, ctx: ToolContext, p: Attendance) -> ToolOutput:
@@ -378,7 +391,7 @@ class AgentTools:
                 ]
             groups = {g.key: g.name for c in repos.cohorts.list_all() for g in repos.groups.list_by_cohort(c.key)}
         if not summaries:
-            return ToolOutput("No trainee you may see.", "0 trainees")
+            return ToolOutput("No trainee you may see.", "אין חניכים")
         lines = [f"Attendance from {first} to {ctx.today}."]
         if p.trainee_id is None:
             # Computed here, not left to the model: averaging twenty percentages is arithmetic a model gets
@@ -389,11 +402,13 @@ class AgentTools:
         if len(summaries) > MAX_TRAINEES_LISTED:
             lines.append(f"(and {len(summaries) - MAX_TRAINEES_LISTED} more)")
         about = [_person(s.trainee) for s in summaries[:MAX_TRAINEES_LISTED]]
-        return ToolOutput("\n".join(lines), f"{len(summaries)} trainees, {p.days} days", about=about)
+        return ToolOutput("\n".join(lines), f"{_trainees(len(summaries))}, {p.days} ימים", about=about)
 
     # -- the schedule -----------------------------------------------------------------------------
 
     def week_schedule(self, ctx: ToolContext, p: WeekSchedule) -> ToolOutput:
+        if p.day is not None and abs((p.day - ctx.today).days) > MAX_WEEKS_AWAY * 7:
+            raise ToolError(f"Only weeks up to {MAX_WEEKS_AWAY} weeks from today")
         sunday = week_start(p.day or ctx.today)
         with self._uow() as repos:
             service = ScheduleService(repos.slots, repos.sessions, repos.cohorts, repos.groups, repos.attendance)
@@ -401,22 +416,25 @@ class AgentTools:
             sessions = [s for c in cohorts for s in service.week(c.key, sunday)]
             groups = {g.key: g.name for c in cohorts for g in repos.groups.list_by_cohort(c.key)}
         if not sessions:
-            return ToolOutput(f"Nothing is published for the week of {sunday}.", f"week of {sunday}: empty")
+            return ToolOutput(f"Nothing is published for the week of {sunday}.", f"השבוע של {sunday:%d.%m}: ריק")
         lines = [f"The week of Sunday {sunday}:"]
         for s in sorted(sessions, key=lambda s: (s.on, s.start, s.key)):
             who = f" · group {groups.get(s.group_id, s.group_id)}" if s.group_id is not None else ""
+            # A one-off's title is free text written for one day ("a meeting with X's father about...").
+            # Kept off any model, as in attendance (review, 2026-10-27): the staff see it in Pacer itself.
+            title = s.title if s.slot_id is not None else "a one-off session (its title is shown only in Pacer)"
             lines.append(
-                f"- {Weekday(s.on.weekday()).label} {s.on} {s.start:%H:%M}-{s.end:%H:%M} · {s.title}{who}"
+                f"- {Weekday(s.on.weekday()).label} {s.on} {s.start:%H:%M}-{s.end:%H:%M} · {title}{who}"
                 + (" · CANCELLED" if s.cancelled else "")
             )
-        return ToolOutput("\n".join(lines), f"week of {sunday}: {len(sessions)} sessions")
+        return ToolOutput("\n".join(lines), f"השבוע של {sunday:%d.%m}: {len(sessions)} משבצות")
 
     # -- the library and the coach ----------------------------------------------------------------
 
     def search_library(self, ctx: ToolContext, p: SearchLibrary) -> ToolOutput:
         hits = retrieve(self._uow, self._embedder, self._chunking, p.query, k=self._k, for_cloud_model=True)
         if not hits:
-            return ToolOutput("No passage in the library is close to this.", "0 passages")
+            return ToolOutput("No passage in the library is close to this.", "אין קטע קרוב")
         lines: list[str] = []
         sources: list[SourceRef] = []
         for hit in hits:
@@ -428,21 +446,21 @@ class AgentTools:
             sources.append(
                 SourceRef(hit.source.key, hit.source.citation, hit.source.evidence_level.label, hit.chunk.section)
             )
-        return ToolOutput("\n".join(lines), f"{len(hits)} passages", sources=sources)
+        return ToolOutput("\n".join(lines), f"{len(hits)} קטעים", sources=sources)
 
     def ask_coach(self, ctx: ToolContext, p: AskCoach) -> ToolOutput:
         result = self._coach.ask(ctx.actor, p.question, p.trainee_id)
         if result.outcome is CoachOutcome.REFERRAL:
             return ToolOutput(
                 "An exceptional incident: the procedure is shown instead.",
-                "referral",
+                "הפניה לנוהל",
                 stop=REFERRAL,
                 cost_usd=result.cost_usd,
             )
         if result.outcome is CoachOutcome.NOT_SENT or result.advice is None:
             return ToolOutput(
                 "The coach did not answer: the question was about health, which Pacer does not advise on.",
-                "not sent (health)",
+                "לא נשלח: מידע בריאותי",
                 cost_usd=result.cost_usd,
             )
         advice = result.advice
@@ -468,16 +486,20 @@ class AgentTools:
         grounded = sum(step.grounded for step in advice.steps)
         return ToolOutput(
             "\n".join(lines),
-            f"{len(advice.steps)} steps, {grounded} grounded",
+            f"{len(advice.steps)} צעדים, {grounded} מבוססי מקור",
             sources=sources,
             cost_usd=result.cost_usd,
         )
 
     def report_incident(self, ctx: ToolContext, p: ReportIncident) -> ToolOutput:
-        return ToolOutput("The procedure is shown.", "referral", stop=REFERRAL)
+        return ToolOutput("The procedure is shown.", "הפניה לנוהל", stop=REFERRAL)
 
 
 # --- helpers -------------------------------------------------------------------------------------
+
+
+def _trainees(n: int) -> str:
+    return "חניך אחד" if n == 1 else f"{n} חניכים"
 
 
 def _person(trainee: Trainee) -> Person:

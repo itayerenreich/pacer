@@ -141,10 +141,12 @@ class AgentCaseResult:
         them (a case that names a trainee expects the agent to look them up)."""
         if not self.resolved.about_ids:
             return None
+        # Successful calls only: their arguments were validated (an int, even if the model wrote "15"),
+        # and a call that came back "not found" was about no one (review, 2026-10-27).
         ids = [
             step.arguments.get("trainee_id")
             for step in self.result.steps
-            if step.tool in TRAINEE_TOOLS and step.arguments.get("trainee_id") is not None
+            if step.ok and step.tool in TRAINEE_TOOLS and step.arguments.get("trainee_id") is not None
         ]
         return bool(ids) and all(i in self.resolved.about_ids for i in ids)
 
@@ -229,6 +231,10 @@ def _pct(value: float | None) -> str:
     return "-" if value is None else f"{round(value * 100)}%"
 
 
+def _num(value: float | None) -> str:
+    return "-" if value is None else str(value)
+
+
 def _mark(value: bool | None) -> str:
     return "-" if value is None else ("✓" if value else "✗")
 
@@ -248,7 +254,7 @@ def render_agent(results: Sequence[AgentCaseResult], summary: dict, meta: Sequen
         f"| התשובה מזכירה מה שצריך, ולא מה שאסור | {_pct(summary['text_ok'])} |",
         f"| סעיפי בדיקה (שופט) | {_pct(summary['checklist'])} |",
         f"| בלי אבחנה, תוויות רפואיות או עצה טיפולית (שופט) | {_pct(summary['always_checked'])} |",
-        f"| קריאות tools לתשובה | {summary['tool_calls_per_answer'] or '-'} |",
+        f"| קריאות tools לתשובה | {_num(summary['tool_calls_per_answer'])} |",
         f"| קריאות שנכשלו (ארגומנט שגוי, לא נמצא) | {summary['failed_tool_calls']} |",
         f"| נעצרו בגבול | {summary['stopped']} |",
         f"| שניות למקרה | {summary['seconds_per_case']} |",

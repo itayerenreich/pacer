@@ -25,6 +25,7 @@ it needs.
 No transaction is open while a model works: every tool opens its own short one.
 """
 
+import json
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -36,7 +37,15 @@ from pacer.domain import StaffMember, StaffRole, Weekday, academy_today
 from pacer.repositories import UnitOfWork
 from pacer.services.permissions import can_view_trainee
 
-from .anonymization import AnonymizationSession, Anonymizer, Person, deanonymize, load_roster, tokens_in
+from .anonymization import (
+    AnonymizationError,
+    AnonymizationSession,
+    Anonymizer,
+    Person,
+    deanonymize,
+    load_roster,
+    tokens_in,
+)
 from .coach import PROCEDURE_NOTE, names_as_written
 from .issues import Issue, IssueCode
 from .llm_client import ChatClient, ChatResponse
@@ -44,7 +53,7 @@ from .prompts import Prompt, load_prompt
 from .risk_screen import SafetyGate
 from .routing import AITask, Router
 from .safety import Referral, check_safety, referral_for
-from .sensitive import remove_sensitive_sentences
+from .sensitive import HEALTH_MASK, is_sensitive, remove_sensitive_sentences
 from .tools import SourceRef, ToolContext, ToolRegistry, ToolRun
 
 log = logging.getLogger(__name__)
@@ -97,7 +106,7 @@ class AgentResult:
     steps: list[AgentStep] = field(default_factory=list)
     sources: list[SourceRef] = field(default_factory=list)
     issues: list[Issue] = field(default_factory=list)
-    stopped_by: str | None = None  # which limit, when outcome is STOPPED
+    stopped_by: str | None = None  # which limit (rounds, tools, cost) or "empty", when outcome is STOPPED
     model: str | None = None
     prompt_ref: str | None = None
     rounds: int = 0
@@ -105,22 +114,32 @@ class AgentResult:
     removed_sentences: int = 0
 
 
+# An unknown cost (a model missing from the price table) is reported as unknown, but the CAP cannot
+# ignore it: that would turn the cap off exactly when nobody knows what is spent (review, 2026-10-27).
+# For the cap, each unknown part counts as this much: more than any priced call of ours.
+UNKNOWN_COST_FOR_CAP_USD = 0.05
+
+
 class _Cost:
     """A running total that becomes None (unknown) as soon as one part is unknown, never a silent 0."""
 
     def __init__(self) -> None:
         self.known = 0.0
-        self.unknown = False
+        self.unknown = 0
 
     def add(self, cost: float | None) -> None:
         if cost is None:
-            self.unknown = True
+            self.unknown += 1
         else:
             self.known += cost
 
     @property
     def total(self) -> float | None:
         return None if self.unknown else self.known
+
+    @property
+    def for_cap(self) -> float:
+        return self.known + self.unknown * UNKNOWN_COST_FOR_CAP_USD
 
 
 class Agent:
@@ -153,6 +172,8 @@ class Agent:
         if not message.strip():
             raise ValueError("The message is empty")
         history = list(history)[-HISTORY_TURNS:]
+        while history and history[0].role == "assistant":  # a conversation starts with the user
+            history.pop(0)
 
         # 0. The phrase list, on what the counselor wrote now and before. Local, and it reveals nothing.
         found = check_safety(message, *(t.content for t in history if t.role == "user"))
@@ -177,7 +198,8 @@ class Agent:
             log.warning("Agent: referral (by %s), staff %s", decision.found_by, actor.id)
             return AgentResult(AgentOutcome.REFERRAL, referral=decision.referral, cost_usd=cost.total)
 
-        # 3. Minimize and anonymize every turn, in one token space.
+        # 3. Minimize and anonymize every turn, in one token space. What the staff member wrote is marked
+        #    as theirs (asker=True): a trainee they may not see is written back only in their own words.
         session = AnonymizationSession(roster)
         kept, removed = remove_sensitive_sentences(message)
         if not kept.strip():
@@ -188,31 +210,36 @@ class Agent:
         for turn in history:
             text, n = remove_sensitive_sentences(turn.content)
             removed += n
-            messages.append({"role": turn.role, "content": session.anonymize(text) if text.strip() else EMPTY_LEFT})
-        messages.append({"role": "user", "content": self._context_line(actor, session) + session.anonymize(kept)})
-        name_for = names_as_written("\n".join([message, *(t.content for t in history if t.role == "user")]), visible)
+            content = session.anonymize(text, asker=turn.role == "user") if text.strip() else EMPTY_LEFT
+            messages.append({"role": turn.role, "content": content})
+        question = session.anonymize(kept, asker=True)
+        messages.append({"role": "user", "content": self._context_line(actor, session) + question})
+        name_for = names_as_written(session.written, visible)
 
         # 4. The loop.
         client = self._client()
         max_tokens = self._router.route(AITask.AGENT).max_tokens
-        context = ToolContext(actor=actor, session=session, today=self._today())
+        context = ToolContext(actor=actor, session=session, today=self._today(), name_for=name_for)
         result = AgentResult(
             AgentOutcome.STOPPED, model=client.model, prompt_ref=self._prompt.ref, removed_sentences=removed
         )
         runs: list[ToolRun] = []
+        forced: str | None = None  # a limit that was reached: the next round is the last, in text only
         try:
             for round_number in range(1, self._max_rounds + 1):
                 result.rounds = round_number
-                if cost.known >= self._max_cost:
-                    result.stopped_by = "cost"
-                    break
-                last = round_number == self._max_rounds or len(runs) >= self._max_tool_calls
+                if forced is None and cost.for_cap >= self._max_cost:
+                    forced = "cost"
+                last = round_number == self._max_rounds or forced is not None
                 response = client.chat(
                     self._prompt, messages, tools=self._tools.schemas(), max_tokens=max_tokens, allow_tools=not last
                 )
                 cost.add(response.cost_usd)
                 if not response.tool_calls:
                     self._finish(result, response, session, name_for)
+                    if forced is not None and result.outcome is AgentOutcome.ANSWER:
+                        detail = f"the {forced} limit was reached: answered from what was found until then"
+                        result.issues.append(Issue(IssueCode.LIMIT_REACHED, None, detail, "answer"))
                     log.info(
                         "Agent: %s for staff %s: rounds=%s tools=%s issues=%s removed=%s",
                         result.outcome,
@@ -224,15 +251,19 @@ class Agent:
                     )
                     return result
                 if last:  # asked to answer in text, it asked for a tool anyway
-                    result.stopped_by = "rounds"
+                    result.stopped_by = forced or "rounds"
                     break
                 messages.append(_assistant_message(response))
                 for call in response.tool_calls:
-                    if len(runs) >= self._max_tool_calls:
+                    # The limits are checked before EVERY call, not only between rounds: one round may ask
+                    # for ten coach calls, each with models of its own (review, 2026-10-27).
+                    if forced is None and len(runs) >= self._max_tool_calls:
+                        forced = "tools"
+                    if forced is None and cost.for_cap >= self._max_cost:
+                        forced = "cost"
+                    if forced is not None:
                         # Every call must get a result, or the provider rejects the conversation.
-                        messages.append(
-                            _tool_message(call.id, "Error: the limit of tool calls was reached. Answer now.")
-                        )
+                        messages.append(_tool_message(call.id, f"Error: the {forced} limit was reached. Answer now."))
                         continue
                     run = self._tools.run(context, call.name, call.arguments)
                     runs.append(run)
@@ -241,14 +272,7 @@ class Agent:
                         log.warning("Agent: referral (by the %s tool), staff %s", run.name, actor.id)
                         result.outcome, result.referral = AgentOutcome.REFERRAL, run.output.stop
                         return result
-                    text, n = remove_sensitive_sentences(run.output.text)
-                    result.removed_sentences += n
-                    about = run.output.about
-                    messages.append(
-                        _tool_message(call.id, session.anonymize(text, prefer=about) if text.strip() else EMPTY_LEFT)
-                    )
-            else:
-                result.stopped_by = "rounds"
+                    messages.append(_tool_message(call.id, self._tool_text(run, session, result)))
             log.warning("Agent: stopped by the %s limit, staff %s", result.stopped_by, actor.id)
             result.answer = STOPPED_ANSWER
             return result
@@ -256,6 +280,19 @@ class Agent:
             result.cost_usd = cost.total
             result.steps = [_step(run, session, name_for) for run in runs]
             result.sources = _sources(runs)
+
+    def _tool_text(self, run: ToolRun, session: AnonymizationSession, result: AgentResult) -> str:
+        """A tool's result as the model may read it: health sentences out, then anonymized. If the
+        anonymizer cannot vouch for it, the model is told so and reads nothing of it."""
+        text, n = remove_sensitive_sentences(run.output.text)
+        result.removed_sentences += n
+        if not text.strip():
+            return EMPTY_LEFT
+        try:
+            return session.anonymize(text, prefer=run.output.about)
+        except AnonymizationError:
+            log.error("Agent: the result of %s could not be anonymized; it was not sent", run.name)
+            return "Error: this result could not be checked for names, so it was not sent. Answer without it."
 
     def _client(self) -> ChatClient:
         client = self._router.client_for(AITask.AGENT)  # the router's privacy checks, as for every task
@@ -301,14 +338,27 @@ class Agent:
 
 
 def _assistant_message(response: ChatResponse) -> dict[str, Any]:
+    """The model's turn, sent back as it was, except arguments that are not a JSON object: LiteLLM's
+    translation for Anthropic fails on them, and the tool's error result already says what was wrong."""
     return {
         "role": "assistant",
         "content": response.text or None,
         "tool_calls": [
-            {"id": c.id, "type": "function", "function": {"name": c.name, "arguments": c.arguments}}
+            {
+                "id": c.id,
+                "type": "function",
+                "function": {"name": c.name, "arguments": _json_object_or_empty(c.arguments)},
+            }
             for c in response.tool_calls
         ],
     }
+
+
+def _json_object_or_empty(arguments: str) -> str:
+    try:
+        return arguments if isinstance(json.loads(arguments or "{}"), dict) else "{}"
+    except json.JSONDecodeError:
+        return "{}"
 
 
 def _tool_message(call_id: str, content: str) -> dict[str, Any]:
@@ -316,12 +366,14 @@ def _tool_message(call_id: str, content: str) -> dict[str, Any]:
 
 
 def _step(run: ToolRun, session: AnonymizationSession, name_for: Callable[[Person], str]) -> AgentStep:
-    """The arguments as the asker may see them: tokens back to names with the same rule as the answer."""
+    """The arguments as the asker may see them: tokens back to names with the same rule as the answer,
+    and a text about health (the model wrote it) not shown, as in the answer (review, 2026-10-27)."""
     source = session.view()
 
     def restore(value: Any) -> Any:
         if isinstance(value, str):
-            return deanonymize(value, source, name_for)
+            text = deanonymize(value, source, name_for)
+            return HEALTH_MASK if is_sensitive(text) else text
         if isinstance(value, list):
             return [restore(v) for v in value]
         if isinstance(value, dict):

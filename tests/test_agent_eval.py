@@ -160,3 +160,22 @@ def test_the_report_renders():
     r = scored(CASE, [("ask_coach", {"trainee_id": 15})], "נחום", about=frozenset({15}))
     report = render_agent([r], agent_summary([r]), ["meta"])
     assert "# הערכת הסוכן" in report and "`ask_coach`" in report and "נחום" in report
+
+
+def test_a_call_that_failed_is_about_no_one():
+    result = AgentResult(
+        AgentOutcome.ANSWER,
+        answer="נחום",
+        steps=[
+            AgentStep("trainee_record", {"trainee_id": 8}, False, "לא נמצא", 1),
+            AgentStep("ask_coach", {"trainee_id": 15}, True, "s", 1),
+        ],
+    )
+    r = AgentCaseResult(ResolvedAgentCase(CASE, 2, frozenset({15})), result, 1.0)
+    assert r.trainee_ok is True
+
+
+def test_zero_tool_calls_per_answer_is_shown_as_zero():
+    bare = AgentCase(id="A02", tests="x", asker="נועה לוי", message="שאלה ארוכה", outcome="answer")
+    r = scored(bare, [], "תשובה")
+    assert "| קריאות tools לתשובה | 0.0 |" in render_agent([r], agent_summary([r]), [])

@@ -41,6 +41,7 @@ class FakeLLMClient:
     replies: "list[Reply] | Callable[[list[dict[str, Any]]], Reply]" = field(default_factory=list)
     chats: "list[ChatCall]" = field(default_factory=list)
     before_chat: Callable[[], None] | None = None  # e.g. assert that no transaction is open
+    before_complete: Callable[[], None] | None = None
 
     def chat(self, prompt, messages, *, tools, max_tokens=1024, allow_tools=True) -> ChatResponse:
         import copy
@@ -82,6 +83,8 @@ class FakeLLMClient:
     ) -> LLMResponse:
         if not isinstance(prompt, Prompt):  # same contract as the real client: a versioned prompt
             raise TypeError("complete() needs a Prompt loaded from a prompt file")
+        if self.before_complete is not None:
+            self.before_complete()
         self.calls.append(Call(prompt, user_message, max_tokens, response_schema))
         if callable(self.answers):
             text = self.answers(user_message)

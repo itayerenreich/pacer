@@ -143,7 +143,7 @@ def test_how_to_deal_with_dani_finds_him_reads_the_record_asks_the_coach_and_ans
     assert result.answer == "כדאי לקבוע עם דני אברהם שוב שעון מעורר, ולהתחיל מפעמיים בשבוע."
     assert [s.tool for s in result.steps] == ["find_trainees", "attendance", "ask_coach"]
     assert all(s.ok for s in result.steps)
-    assert result.steps[2].summary == "2 steps, 1 grounded"
+    assert result.steps[2].summary == "2 צעדים, 1 מבוססי מקור"
     assert [s.citation for s in result.sources] == ['משנה תורה, הלכות תלמוד תורה (רמב"ם)']
     assert result.note == PROCEDURE_NOTE and result.rounds == 3 and result.prompt_ref == "agent@v1"
 
@@ -387,15 +387,18 @@ def test_the_tool_calls_limit_every_call_still_gets_a_result(uow, repos):
     agent, cloud = build(uow, use("week_schedule", "week_schedule", "week_schedule"), say("די"), max_tool_calls=2)
     result = agent.chat(staff(repos, 2), "מה יש השבוע?")
     results = cloud.chats[1].tool_results()
-    assert len(results) == 3 and "limit of tool calls" in results[2]
+    assert len(results) == 3 and "the tools limit was reached" in results[2]
     assert len(result.steps) == 2 and cloud.chats[1].allow_tools is False
     assert result.outcome is AgentOutcome.ANSWER
 
 
 def test_the_cost_limit_counts_the_models_inside_tools_too(uow, repos):
+    """Over the cap, the tool does not run, and the model answers once more, from what it has, in text."""
     agent, cloud = build(uow, use("week_schedule", cost_usd=0.2), say("די"), max_cost_usd=0.15)
     result = agent.chat(staff(repos, 2), "מה יש השבוע?")
-    assert result.outcome is AgentOutcome.STOPPED and result.stopped_by == "cost" and len(cloud.chats) == 1
+    assert "the cost limit was reached" in cloud.chats[1].tool_results()[0] and result.steps == []
+    assert cloud.chats[1].allow_tools is False and result.outcome is AgentOutcome.ANSWER
+    assert [i.code for i in result.issues] == [IssueCode.LIMIT_REACHED]
 
 
 def test_an_unknown_cost_makes_the_total_unknown_never_zero(uow, repos):
@@ -443,20 +446,20 @@ def test_attendance_of_a_group_lowest_first_with_template_sessions_only(uow, rep
 
 def test_week_schedule_and_search_library(uow, repos):
     repos.sessions.add(
-        ScheduledSession(cohort_id=1, on=date(2026, 10, 26), start=time(7), end=time(8), title="ספורט בוקר")
+        ScheduledSession(cohort_id=1, on=date(2026, 10, 26), start=time(7), end=time(8), title="ספורט בוקר", slot_id=1)
     )
     agent, cloud = build(uow, use("week_schedule", ("search_library", {"query": "חלוקת הלימוד"})), say("הנה"))
     result = agent.chat(staff(repos, 2), "מה השבוע ומה אומרים המקורות?")
     week, library = cloud.chats[1].tool_results()
     assert "The week of Sunday 2026-10-25" in week and "2026-10-26 07:00-08:00 · ספורט בוקר" in week
     assert "לפי כוחם" in library and "מקור ערכי-מסורתי" in library
-    assert [s.summary for s in result.steps] == ["week of 2026-10-25: 1 sessions", "1 passages"]
+    assert [s.summary for s in result.steps] == ["השבוע של 25.10: 1 משבצות", "1 קטעים"]
 
 
 def test_the_trace_shows_counts_never_content(uow, repos):
     agent, cloud = build(uow, use(("trainee_record", {"trainee_id": 1})), say("סיימתי"))
     (step,) = agent.chat(staff(repos, 2), "מה עם דני?").steps
-    assert step.summary == "trainee 1: 1 goals, 1 notes" and step.arguments == {"trainee_id": 1}
+    assert step.summary == "1 מטרות, 1 הערות" and step.arguments == {"trainee_id": 1}
 
 
 def test_the_trace_restores_names_with_the_same_rule_as_the_answer(uow, repos):
@@ -470,7 +473,9 @@ def test_two_different_ambiguous_words_never_share_a_token(uow, repos):
     """ "יעל" (two trainees) in the message, and "בר" (a name that is also a word) in a tool's result:
     anonymized one by one, each would be [NAME_1]. In one conversation they must not be."""
     repos.sessions.add(
-        ScheduledSession(cohort_id=1, on=date(2026, 10, 26), start=time(19), end=time(21), title="ערב בר מצווה")
+        ScheduledSession(
+            cohort_id=1, on=date(2026, 10, 26), start=time(19), end=time(21), title="ערב בר מצווה", slot_id=1
+        )
     )
     agent, cloud = build(uow, use("week_schedule"), say("[NAME_1]: [NAME_2]"))
     result = agent.chat(staff(repos, 1), "האם יעל צריכה להגיע לאירוע השבוע?")
@@ -523,7 +528,7 @@ def test_the_api_answers_with_the_steps_and_the_procedure_line(api):
             "tool": "trainee_record",
             "arguments": {"trainee_id": 1},
             "ok": True,
-            "summary": "trainee 1: 1 goals, 1 notes",
+            "summary": "1 מטרות, 1 הערות",
             "latency_ms": body["steps"][0]["latency_ms"],
         }
     ]
@@ -574,3 +579,128 @@ def test_the_tool_names_constant_is_the_registry(uow, repos):
 
     agent, _ = build(uow)
     assert tuple(agent._tools.names) == TOOL_NAMES
+
+
+# --- the independent review, 2026-10-27 ----------------------------------------------------------
+
+
+def test_a_hidden_trainee_comes_back_only_in_the_form_the_asker_wrote_for_that_token(uow, repos):
+    """Noa may not see Yael Cohen. She writes "כהן" for her, and "יעל" for someone else: Cohen must come
+    back as "כהן", never as "יעל" (that would tell Noa her first name)."""
+    agent, cloud = build(uow, say("כדאי לדבר שוב עם [TRAINEE_4]."))
+    result = agent.chat(staff(repos, 2), "דיברתי היום עם כהן מהקבוצה של דנה, ויעל מהקבוצה שלי שאלה עליה")
+    assert "[TRAINEE_4]" in cloud.chats[0].messages[-1]["content"]
+    assert result.answer == "כדאי לדבר שוב עם כהן."
+
+
+def test_a_token_the_asker_never_wrote_is_never_turned_into_a_name(uow, repos):
+    """Tokens are database ids, so a model could guess [TRAINEE_4]. Nothing in the conversation stood for
+    it: it stays a token, in the answer and in the trace, and is reported."""
+    agent, cloud = build(uow, use(("find_trainees", {"name": "[TRAINEE_4]"})), say("[TRAINEE_4] לא בקבוצה שלך."))
+    result = agent.chat(staff(repos, 2), "מי בקבוצה של דנה?")
+    assert result.answer == "[TRAINEE_4] לא בקבוצה שלך." and "יעל" not in str(result.steps)
+    assert [i.code for i in result.issues] == [IssueCode.UNKNOWN_TOKEN]
+    assert cloud.chats[1].tool_results()[0] == "No trainee you may see matches."
+
+
+@pytest.mark.parametrize("disguise", ["​", "ְ", "‏"])
+def test_a_token_disguised_with_an_invisible_character_is_defused_too(uow, repos, disguise):
+    agent, cloud = build(uow, say("בסדר"))
+    agent.chat(staff(repos, 1), f"איך יעל מסתדרת? ומה עם [NAME{disguise}_1] ו-[TRAINEE{disguise}_2]?")
+    sent = cloud.chats[0].messages[-1]["content"]
+    assert sent.count("[NAME_1]") == 1 and "[TRAINEE_2]" not in sent
+
+
+def test_a_one_off_sessions_title_never_reaches_the_model(uow, repos):
+    repos.sessions.add(
+        ScheduledSession(
+            cohort_id=1, on=date(2026, 10, 26), start=time(9), end=time(10), title="פגישה עם משה אבא של דני על החובות"
+        )
+    )
+    agent, cloud = build(uow, use("week_schedule"), say("הנה"))
+    agent.chat(staff(repos, 2), "מה יש השבוע?")
+    week = cloud.chats[1].tool_results()[0]
+    assert "משה" not in week and "החובות" not in week and "a one-off session" in week
+
+
+def test_health_the_model_wrote_in_an_argument_is_not_shown_in_the_trace(uow, repos):
+    agent, cloud = build(uow, use(("search_library", {"query": "חניך עם הפרעת קשב שלוקח ריטלין"})), say("הנה"))
+    (step,) = agent.chat(staff(repos, 2), "איך עוזרים לחניך להתרכז?").steps
+    assert step.arguments == {"query": "[…]"}
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments"),
+    [
+        ("ask_coach", {"question": "      "}),
+        ("search_library", {"query": "   "}),
+        ("week_schedule", {"day": "0001-01-01"}),
+        ("week_schedule", {"day": "9999-12-31"}),
+    ],
+)
+def test_arguments_that_pass_the_schema_but_not_the_code_are_errors_not_crashes(uow, repos, name, arguments):
+    agent, cloud = build(uow, use((name, arguments)), say("טעיתי"))
+    result = agent.chat(staff(repos, 2), "שאלה כלשהי לבדיקה")
+    assert cloud.chats[1].tool_results()[0].startswith("Error:") and result.outcome is AgentOutcome.ANSWER
+
+
+def test_an_unknown_cost_does_not_turn_the_cap_off(uow, repos):
+    agent, cloud = build(uow, use("week_schedule", cost_usd=None), max_cost_usd=0.01)
+    result = agent.chat(staff(repos, 2), "מה יש השבוע?")
+    assert len(cloud.chats) == 2 and cloud.chats[1].allow_tools is False  # not six rounds
+    assert result.cost_usd is None and result.stopped_by == "cost"
+
+
+def test_the_cap_is_checked_before_every_call_not_only_between_rounds(uow, repos):
+    coach_calls = [("ask_coach", {"question": f"שאלה מספר {i} על חניך", "trainee_id": 1}) for i in range(5)]
+    agent, cloud = build(uow, use(*coach_calls, cost_usd=0.002), say("די"), max_cost_usd=0.001)
+    result = agent.chat(staff(repos, 2), "מה עם דני?")
+    assert result.steps == [] and all("cost limit" in r for r in cloud.chats[1].tool_results())
+
+
+def test_a_history_that_starts_with_the_assistant_is_trimmed_to_start_with_the_user(uow, repos):
+    agent, cloud = build(uow, say("כן"))
+    agent.chat(staff(repos, 2), "ומה עכשיו?", [Turn("assistant", "שלום! במה אפשר לעזור?"), Turn("user", "שאלה")])
+    assert [m["role"] for m in cloud.chats[0].messages] == ["user", "user"]
+
+
+def test_arguments_that_are_not_a_json_object_go_back_to_the_model_as_an_empty_object(uow, repos):
+    agent, cloud = build(uow, use(("trainee_record", "{not json")), say("טעיתי"))
+    agent.chat(staff(repos, 2), "מה עם דני?")
+    (call,) = cloud.chats[1].messages[-2]["tool_calls"]
+    assert call["function"]["arguments"] == "{}"
+
+
+def test_no_transaction_is_open_during_any_model_call_the_gate_and_the_coach_included(uow, repos):
+    agent, cloud = build(
+        uow,
+        use(("ask_coach", {"trainee_id": 1, "question": "איך לעזור ל[TRAINEE_1]?"})),
+        say("הנה"),
+        answers=[NO_RISK, NO_RISK, coach_answer()],
+    )
+    cloud.before_complete = lambda: _no_transaction(uow)
+    agent.chat(staff(repos, 2), "איך לעזור לדני?")
+    assert len(cloud.calls) == 3  # the agent's screen, the coach's screen, the coach: each checked
+
+
+def test_attendance_of_a_group_the_counselor_does_not_lead_is_not_found(uow, repos):
+    agent, cloud = build(uow, use(("attendance", {"group_id": 2})), say("לא"))
+    agent.chat(staff(repos, 2), "מה הנוכחות באלון?")
+    assert cloud.chats[1].tool_results()[0].startswith("Error: not found")
+
+
+def test_attendance_with_no_arguments_is_only_the_counselors_own_trainees(uow, repos):
+    agent, cloud = build(uow, use("attendance"), say("הנה"))
+    agent.chat(staff(repos, 2), "מה הנוכחות?")
+    result = cloud.chats[1].tool_results()[0]
+    assert "[TRAINEE_4]" not in result and "Group ארז" in result and "אלון" not in result
+
+
+def test_the_coach_also_restores_a_hidden_trainee_by_token():
+    from pacer.ai.anonymization import Person, PersonKind
+    from pacer.ai.coach import names_as_written
+
+    name_for = names_as_written({"[TRAINEE_4]": ["כהן"]}, visible={1, 2, 3})
+    assert name_for(Person(PersonKind.TRAINEE, 4, "יעל", "כהן")) == "כהן"
+    assert name_for(Person(PersonKind.TRAINEE, 9, "x", "y")) == "חניך/ה"
+    assert name_for(Person(PersonKind.TRAINEE, 1, "דני", "אברהם")) == "דני אברהם"
