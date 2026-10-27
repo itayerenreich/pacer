@@ -11,6 +11,7 @@ uv run python -m pacer.evaluation coach --out data/coach-haiku.md           # th
 uv run python -m pacer.evaluation coach --model claude-sonnet --out data/coach-sonnet.md
 uv run python -m pacer.evaluation agent --out data/agent-haiku.md           # the agent: about $0.30
 uv run python -m pacer.evaluation agent --model claude-sonnet --out data/agent-sonnet.md
+uv run python -m pacer.evaluation screen "מה המצב של נדב הררי?" --as 4 --times 3   # the gate on one text
 
 check and masking need no model. run needs ANTHROPIC_API_KEY, and Ollama for the embeddings (bge-m3).
 All read the academy from the database in .env (the demo academy: python -m pacer.demo). run writes the
@@ -72,7 +73,7 @@ from .talk_set import CaseError, load_talk_set, resolve
 LIBRARY_SET = Path("evals/library-v1.json")
 TALK_SET = Path("evals/talks-v1.json")
 COACH_SET = Path("evals/coach-v1.json")
-AGENT_SET = Path("evals/agent-v1.json")
+AGENT_SET = Path("evals/agent-v2.json")
 SAFETY_SETS = {"heldout": Path("evals/safety-heldout-v1.json"), "main": Path("evals/safety-v1.json")}
 MANIFESTS = [Path("library/classics.json")]
 
@@ -438,6 +439,26 @@ def agent_run(model: str, *, limit: int | None, judge: bool) -> tuple[str, dict]
     return render_agent(results, summary, meta), summaries
 
 
+def screen_text(text: str, *, staff_id: int, times: int) -> str:
+    """The safety gate on one text, several times: is a referral stable, and what does the screen say?
+    The exact text the screen saw is printed too (anonymized: no name in it). A fraction of a cent."""
+    uow = _uow()
+    with uow() as repos:
+        roster = load_roster(repos.staff, repos.trainees)
+        if repos.staff.get(staff_id) is None:
+            raise SystemExit(f"No staff member with id {staff_id}")
+    anonymizer = Anonymizer(roster)
+    gate = SafetyGate(router_for("claude-haiku"))
+    lines = [f"# השער על טקסט אחד ({times} פעמים)", "", f"נשלח ל-screen: `{anonymizer.anonymize(text).text}`", ""]
+    for n in range(1, times + 1):
+        decision = gate.assess(text, anonymizer)
+        verdict = (
+            f"הפניה ({decision.found_by}; {', '.join(sorted(decision.kinds))})" if decision.is_risk else "לא סיכון"
+        )
+        lines.append(f"{n}. {verdict}. נימוק: {decision.reason or '-'}")
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="python -m pacer.evaluation", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -464,6 +485,11 @@ def main(argv: list[str] | None = None) -> None:
     agenting.add_argument("--limit", type=int, help="only the first N cases")
     agenting.add_argument("--no-judge", action="store_true", help="skip the judge (code checks only)")
     agenting.add_argument("--out", type=Path, required=True, help="the report; the JSON summary goes next to it")
+    one = commands.add_parser("screen", help="the safety gate on one text, several times (a fraction of a cent)")
+    one.add_argument("text")
+    one.add_argument("--as", dest="staff_id", type=int, default=1, help="the staff member asking (default: 1)")
+    one.add_argument("--times", type=int, default=3)
+    one.add_argument("--out", type=Path)
     screening = commands.add_parser("safety", help="the safety gate on a risk set (--send: with the model)")
     screening.add_argument("--set", dest="which", default="heldout", choices=list(SAFETY_SETS))
     screening.add_argument("--send", action="store_true", help="also ask the model screen (costs a few cents)")
@@ -484,6 +510,8 @@ def main(argv: list[str] | None = None) -> None:
         report, summaries = coach_run(
             args.model, limit=args.limit, baseline=not args.no_baseline, judge=not args.no_judge
         )
+    elif args.command == "screen":
+        report = screen_text(args.text, staff_id=args.staff_id, times=args.times)
     elif args.command == "agent":
         report, summaries = agent_run(args.model, limit=args.limit, judge=not args.no_judge)
     elif args.command == "safety":

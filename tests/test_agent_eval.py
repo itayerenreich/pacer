@@ -21,7 +21,8 @@ from pacer.evaluation.agent_eval import (
 )
 from pacer.services.permissions import can_view_trainee
 
-AGENT_SET = Path(__file__).parent.parent / "evals" / "agent-v1.json"
+EVALS = Path(__file__).parent.parent / "evals"
+AGENT_SET = EVALS / "agent-v2.json"  # the current set; v1 stays as it was, for the results already reported
 
 
 @pytest.fixture(scope="module")
@@ -31,8 +32,9 @@ def academy():
     return repos
 
 
-def test_the_set_fits_the_demo_academy_and_the_tools(academy):
-    eval_set = load_agent_set(AGENT_SET)
+@pytest.mark.parametrize("version", [1, 2])
+def test_the_set_fits_the_demo_academy_and_the_tools(academy, version):
+    eval_set = load_agent_set(EVALS / f"agent-v{version}.json")
     resolved, problems = resolve_agent_cases(eval_set, academy, TOOL_NAMES)
     assert problems == [] and len(resolved) == len(eval_set.cases)
 
@@ -179,3 +181,49 @@ def test_zero_tool_calls_per_answer_is_shown_as_zero():
     bare = AgentCase(id="A02", tests="x", asker="נועה לוי", message="שאלה ארוכה", outcome="answer")
     r = scored(bare, [], "תשובה")
     assert "| קריאות tools לתשובה | 0.0 |" in render_agent([r], agent_summary([r]), [])
+
+
+# --- the checks added after the first real run (2026-10-27) --------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("answer", "hebrew", "hidden"),
+    [
+        ("עד יום חמישי 30.10, ב-94.2% נוכחות. זה נכתב ב-Pacer.", True, True),
+        ("עד יום jueves 30.10: להכין שאלה", False, True),
+        ("רשימה. Someone also appears in the group", False, True),
+        ("שלחו לי את שמו או את הטוקן שלו", True, False),
+        ("כדאי לבדוק את [TRAINEE_4]", True, False),
+        ("קראתי ל-my_tasks", True, False),
+    ],
+)
+def test_hebrew_only_and_nothing_of_the_machinery(answer, hebrew, hidden):
+    bare = AgentCase(id="A02", tests="x", asker="נועה לוי", message="שאלה ארוכה", outcome="answer")
+    r = scored(bare, [], answer)
+    assert (r.hebrew_ok, r.hidden_ok, r.passed) == (hebrew, hidden, hebrew and hidden)
+
+
+def test_no_answer_no_language_check():
+    bare = AgentCase(id="A02", tests="x", asker="נועה לוי", message="שאלה ארוכה", outcome="referral")
+    r = scored(bare, [], None, AgentOutcome.REFERRAL)
+    assert (r.hebrew_ok, r.hidden_ok) == (None, None)
+
+
+def test_the_report_says_who_sent_the_procedure_and_why():
+    bare = AgentCase(id="A07", tests="x", asker="שירה אברהם", message="שאלה ארוכה", outcome="answer")
+    from pacer.ai.safety import REFERRAL
+
+    result = AgentResult(
+        AgentOutcome.REFERRAL, referral=REFERRAL, referral_by="model", screen_reason="mentions a fight"
+    )
+    r = AgentCaseResult(ResolvedAgentCase(bare, 4, frozenset()), result, 1.0)
+    report = render_agent([r], agent_summary([r]), [])
+    assert "מה-screen של Claude" in report and "נימוק ה-screen: mentions a fight" in report
+
+
+def test_v2_fixes_the_two_keys_the_first_run_found_wrong():
+    v1 = {c.id: c for c in load_agent_set(EVALS / "agent-v1.json").cases}
+    v2 = {c.id: c for c in load_agent_set(EVALS / "agent-v2.json").cases}
+    assert v1["A01"].any_of and not v2["A01"].any_of
+    assert v2["A05"].answer_mentions == ["8"]
+    assert {k for k in v1 if v1[k] != v2[k]} == {"A01", "A05"}  # nothing else changed
