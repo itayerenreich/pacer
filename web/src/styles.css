@@ -1,0 +1,776 @@
+/* Pacer: a counselor's field notebook. Sage paper, pine ink, one marker colour for what needs a look
+   (the agent's waypoints, low attendance), and red only for the exceptional-incident procedure. */
+
+:root {
+  --paper: #edefe8;
+  --paper-raised: #f6f7f2;
+  --ink: #22332b;
+  --ink-soft: #5b6b62;
+  --pine: #2e5e4e;
+  --pine-deep: #1f4639;
+  --contour: #c5ccbf;
+  --marker: #e9b92f;
+  --marker-soft: #f6e3a6;
+  --alarm: #a8322b;
+  --alarm-soft: #f3dcd8;
+
+  --display: "Karantina", "Arial Narrow", sans-serif;
+  --body: "IBM Plex Sans Hebrew", "Arial", sans-serif;
+
+  --step--1: 0.875rem;
+  --step-0: 1rem;
+  --step-1: 1.25rem;
+  --step-2: 1.75rem;
+  --step-3: 2.5rem;
+  --step-4: 3.5rem;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #18211d;
+    --paper-raised: #202b26;
+    --ink: #e3e8e0;
+    --ink-soft: #a3b0a8;
+    --pine: #7fb39f;
+    --pine-deep: #0f2c22;
+    --contour: #3a4741;
+    --marker: #e9b92f;
+    --marker-soft: #4a3f1c;
+    --alarm: #e0786f;
+    --alarm-soft: #3d2320;
+    color-scheme: dark;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: var(--step-0);
+  line-height: 1.6;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 3px solid var(--marker);
+  outline-offset: 2px;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--display);
+  font-weight: 700;
+  line-height: 1;
+  margin: 0;
+  letter-spacing: 0.01em;
+}
+
+h1 {
+  font-size: var(--step-4);
+}
+
+h2 {
+  font-size: var(--step-3);
+}
+
+h3 {
+  font-size: var(--step-2);
+}
+
+p {
+  margin: 0 0 0.75em;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.quiet {
+  color: var(--ink-soft);
+}
+
+.error {
+  color: var(--alarm);
+}
+
+/* --- the shell: a pine rail on the right (RTL), the page beside it ------------------------------- */
+
+.shell {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.rail .short {
+  display: none;
+}
+
+.rail {
+  background: var(--pine-deep);
+  color: #e6ece4;
+  padding: 1.5rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+}
+
+.rail .mark {
+  font-family: var(--display);
+  font-size: var(--step-4);
+  line-height: 0.8;
+  color: var(--marker);
+}
+
+.rail nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.rail nav a {
+  color: inherit;
+  text-decoration: none;
+  padding: 0.35rem 0;
+  font-size: var(--step-1);
+  font-family: var(--display);
+  border-bottom: 3px solid transparent;
+  width: fit-content;
+}
+
+.rail nav a[aria-current="page"] {
+  border-bottom-color: var(--marker);
+}
+
+.rail .who {
+  margin-top: auto;
+  font-size: var(--step--1);
+  color: #b9c6bd;
+}
+
+.rail .who button {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--marker);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.page {
+  padding: 2.5rem clamp(1rem, 4vw, 3.5rem) 4rem;
+  max-width: 72rem;
+  width: 100%;
+}
+
+.page > header {
+  margin-bottom: 2rem;
+}
+
+.page > header p {
+  margin-top: 0.5rem;
+  max-width: 60ch;
+}
+
+@media (max-width: 720px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .rail {
+    position: fixed;
+    inset: auto 0 0 0;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    padding: 0.5rem 1rem;
+    gap: 1rem;
+    z-index: 5;
+  }
+
+  .rail .mark {
+    display: none;
+  }
+
+  .rail nav {
+    flex-direction: row;
+    justify-content: space-around;
+    width: 100%;
+  }
+
+  .rail .long {
+    display: none;
+  }
+
+  .rail .short {
+    display: inline;
+  }
+
+  .rail .who {
+    display: none;
+  }
+
+  .page {
+    padding-bottom: 6rem;
+  }
+
+  h1 {
+    font-size: var(--step-3);
+  }
+}
+
+/* --- shared controls ------------------------------------------------------------------------------ */
+
+.button {
+  background: var(--pine);
+  color: var(--paper-raised);
+  border: 0;
+  border-radius: 6px;
+  padding: 0.55rem 1.1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--pine);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.field {
+  background: var(--paper-raised);
+  border: 1px solid var(--contour);
+  border-radius: 6px;
+  padding: 0.55rem 0.75rem;
+  width: 100%;
+}
+
+.ruled {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ruled > li {
+  border-bottom: 1px solid var(--contour);
+  padding: 0.75rem 0;
+}
+
+.bar {
+  height: 0.5rem;
+  background: var(--contour);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.bar > span {
+  display: block;
+  height: 100%;
+  background: var(--pine);
+}
+
+.bar.low > span {
+  background: var(--marker);
+}
+
+.big-number {
+  font-family: var(--display);
+  font-size: var(--step-4);
+  line-height: 0.9;
+}
+
+/* --- sign in ------------------------------------------------------------------------------------- */
+
+.sign-in {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+
+.sign-in form {
+  width: min(26rem, 100%);
+  display: grid;
+  gap: 1rem;
+}
+
+.sign-in .mark {
+  font-family: var(--display);
+  font-size: 6rem;
+  line-height: 0.8;
+  color: var(--pine);
+}
+
+/* --- the conversation ---------------------------------------------------------------------------- */
+
+.conversation {
+  display: grid;
+  gap: 2.5rem;
+  margin-bottom: 2rem;
+}
+
+.question {
+  font-size: var(--step-1);
+  font-weight: 600;
+  max-width: 60ch;
+}
+
+.exchange {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16rem;
+  gap: 2.5rem;
+  align-items: start;
+}
+
+@media (max-width: 960px) {
+  .exchange {
+    grid-template-columns: 1fr;
+  }
+}
+
+.answer {
+  max-width: 65ch;
+}
+
+.answer ul,
+.answer ol {
+  padding-inline-start: 1.25rem;
+  margin: 0 0 0.75em;
+}
+
+.answer li {
+  margin-bottom: 0.35em;
+}
+
+.procedure-note {
+  font-size: var(--step--1);
+  color: var(--ink-soft);
+  border-top: 1px solid var(--contour);
+  padding-top: 0.75rem;
+  margin-top: 1rem;
+}
+
+.sources {
+  font-size: var(--step--1);
+  margin-top: 1rem;
+}
+
+.sources ul {
+  margin: 0.25rem 0 0;
+  padding-inline-start: 1.25rem;
+}
+
+/* The route: what the agent looked up, drawn as a navigation leg. Each tool call is a waypoint on a
+   dashed line; the answer is where the line ends. */
+.route {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  position: relative;
+  font-size: var(--step--1);
+}
+
+.route::before {
+  content: "";
+  position: absolute;
+  inset-block: 0.6rem 0.6rem;
+  inset-inline-start: 0.45rem;
+  border-inline-start: 2px dashed var(--pine);
+}
+
+.route li {
+  position: relative;
+  padding-inline-start: 1.75rem;
+  padding-bottom: 1rem;
+}
+
+.route li::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: 0;
+  top: 0.3rem;
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 50%;
+  background: var(--marker);
+  border: 2px solid var(--pine);
+}
+
+.route li.failed::before {
+  background: var(--paper);
+  border-style: dashed;
+}
+
+.route li.end::before {
+  border-radius: 2px;
+  background: var(--pine);
+  transform: rotate(45deg) scale(0.85);
+}
+
+.route .leg {
+  font-weight: 600;
+  display: block;
+}
+
+.route .detail {
+  color: var(--ink-soft);
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.route-title {
+  font-family: var(--display);
+  font-size: var(--step-1);
+  margin-bottom: 0.75rem;
+  color: var(--ink-soft);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .route.arriving li {
+    animation: waypoint 260ms ease-out both;
+  }
+
+  @keyframes waypoint {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+  }
+}
+
+.referral {
+  border-inline-start: 5px solid var(--alarm);
+  background: var(--alarm-soft);
+  padding: 1.25rem 1.5rem;
+  border-radius: 0 6px 6px 0;
+  max-width: 65ch;
+}
+
+[dir="rtl"] .referral {
+  border-radius: 6px 0 0 6px;
+}
+
+.referral h3 {
+  color: var(--alarm);
+  margin-bottom: 0.75rem;
+}
+
+.referral ol {
+  margin: 0;
+  padding-inline-start: 1.25rem;
+}
+
+.referral li {
+  margin-bottom: 0.6rem;
+}
+
+.referral .contact {
+  display: block;
+  font-weight: 600;
+}
+
+.composer {
+  position: sticky;
+  bottom: 1rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  background: var(--paper);
+  padding-top: 0.75rem;
+  max-width: 50rem;
+}
+
+.composer textarea {
+  resize: vertical;
+  min-height: 3.2rem;
+}
+
+@media (max-width: 720px) {
+  .composer {
+    bottom: 4.5rem;
+  }
+}
+
+.starters {
+  max-width: 50rem;
+}
+
+.starters button {
+  display: block;
+  width: 100%;
+  text-align: start;
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--contour);
+  padding: 0.85rem 0;
+  font-size: var(--step-1);
+  cursor: pointer;
+}
+
+.starters button:hover {
+  color: var(--pine);
+}
+
+.thinking {
+  color: var(--ink-soft);
+}
+
+/* --- trainees ------------------------------------------------------------------------------------ */
+
+.two-pane {
+  display: grid;
+  grid-template-columns: 18rem minmax(0, 1fr);
+  gap: 3rem;
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  .two-pane {
+    grid-template-columns: 1fr;
+  }
+}
+
+.roster h3 {
+  font-size: var(--step-1);
+  margin: 1.25rem 0 0.25rem;
+  color: var(--ink-soft);
+}
+
+.roster button {
+  display: block;
+  width: 100%;
+  text-align: start;
+  background: none;
+  border: 0;
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.roster button[aria-pressed="true"] {
+  background: var(--marker-soft);
+  font-weight: 600;
+}
+
+.roster .left {
+  color: var(--ink-soft);
+}
+
+.profile section {
+  margin-top: 2.25rem;
+}
+
+.profile h3 {
+  margin-bottom: 0.75rem;
+}
+
+.goal {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 3.5rem;
+  gap: 0.25rem 1rem;
+  align-items: center;
+}
+
+.goal .bar {
+  grid-column: 1 / -1;
+}
+
+.note-kind {
+  font-weight: 600;
+  margin-inline-end: 0.5rem;
+}
+
+.note-kind.worked {
+  color: var(--pine);
+}
+
+.note-kind.did_not_work {
+  color: var(--alarm);
+}
+
+.attendance-line {
+  display: flex;
+  align-items: baseline;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+/* --- the week ------------------------------------------------------------------------------------ */
+
+.week-nav {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.week {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(8.5rem, 1fr));
+  gap: 0.75rem;
+  overflow-x: auto;
+  padding-bottom: 0.5rem;
+}
+
+.day h3 {
+  font-size: var(--step-1);
+  border-bottom: 2px solid var(--ink);
+  padding-bottom: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.day.today h3 {
+  border-bottom-color: var(--marker);
+}
+
+.slot {
+  display: block;
+  width: 100%;
+  text-align: start;
+  background: var(--paper-raised);
+  border: 1px solid var(--contour);
+  border-radius: 4px;
+  padding: 0.4rem 0.5rem;
+  margin-bottom: 0.4rem;
+  cursor: pointer;
+  font-size: var(--step--1);
+  line-height: 1.35;
+}
+
+.slot time {
+  display: block;
+  color: var(--ink-soft);
+  unicode-bidi: isolate;
+}
+
+.slot.cancelled {
+  text-decoration: line-through;
+  color: var(--ink-soft);
+}
+
+.slot[aria-pressed="true"] {
+  border-color: var(--pine);
+  box-shadow: inset 0 0 0 1px var(--pine);
+}
+
+.sheet {
+  margin-top: 2.5rem;
+  max-width: 44rem;
+}
+
+.sheet li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.marks {
+  display: inline-flex;
+  border: 1px solid var(--contour);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.marks button {
+  background: var(--paper-raised);
+  border: 0;
+  padding: 0.3rem 0.75rem;
+  cursor: pointer;
+  font-size: var(--step--1);
+}
+
+.marks button + button {
+  border-inline-start: 1px solid var(--contour);
+}
+
+.marks button[aria-pressed="true"] {
+  background: var(--pine);
+  color: var(--paper-raised);
+}
+
+.marks button.absent[aria-pressed="true"] {
+  background: var(--marker);
+  color: var(--ink);
+}
+
+.saved {
+  color: var(--pine);
+  font-weight: 600;
+}
+
+/* --- the dashboard ------------------------------------------------------------------------------- */
+
+.groups-at-a-glance {
+  display: flex;
+  gap: 3.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 2.5rem;
+}
+
+.rates li {
+  display: grid;
+  grid-template-columns: 11rem minmax(0, 1fr) 3rem;
+  gap: 1rem;
+  align-items: center;
+}
+
+@media (max-width: 560px) {
+  .rates li {
+    grid-template-columns: 1fr 3rem;
+  }
+
+  .rates .bar {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 3rem;
+  align-items: start;
+}
+
+@media (max-width: 860px) {
+  .columns {
+    grid-template-columns: 1fr;
+  }
+}
+
+.columns h2 {
+  font-size: var(--step-2);
+  margin-bottom: 0.75rem;
+}

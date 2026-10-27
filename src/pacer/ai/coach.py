@@ -30,7 +30,7 @@ No transaction is open while a model works: one short read, then models.
 
 import logging
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from enum import StrEnum
@@ -152,7 +152,13 @@ def coach_document(question: str, context: TraineeContext | None) -> str:
     lines = ["Question:", question, ""]
     if context is None:
         return "\n".join([*lines, "Trainee: none (a general question)"])
-    lines += [f"Trainee: {context.trainee.full_name}", "Goals:"]
+    return "\n".join([*lines, *trainee_lines(context)])
+
+
+def trainee_lines(context: TraineeContext) -> list[str]:
+    """What is known about a trainee, one item per line. The coach's message and the agent's
+    trainee_record tool both use it, so the two read a trainee the same way."""
+    lines = [f"Trainee: {context.trainee.full_name}", "Goals:"]
     for item in context.goals:
         goal = item.goal
         lines.append(f"- {goal.title} (category: {goal.category}, progress: {goal.progress}%, status: {goal.status})")
@@ -164,7 +170,7 @@ def coach_document(question: str, context: TraineeContext | None) -> str:
     lines += [f"- [{note.kind}] {note.created_at:%Y-%m-%d}: {note.text}" for note in context.notes]
     if not context.notes:
         lines.append("- (no notes yet)")
-    return "\n".join(lines)
+    return lines
 
 
 def _attendance_lines(context: TraineeContext) -> list[str]:
@@ -192,6 +198,7 @@ class PreparedMessage:
     question: AnonymizedText  # the question alone, anonymized: what retrieval searches with
     removed: int  # health sentences removed before anything was sent
     question_left: bool  # False when the whole question was about health: nothing is sent
+    written: Mapping[str, list[str]]  # token -> how the asker wrote that person in the question
 
 
 def prepare_coach_message(
@@ -206,11 +213,13 @@ def prepare_coach_message(
         prefer.append(person)
     kept_question, _ = remove_sensitive_sentences(question)
     kept_document, removed = remove_sensitive_sentences(coach_document(question, context))
+    written: dict[str, list[str]] = {}
     return PreparedMessage(
         document=anonymizer.anonymize(kept_document, prefer=prefer),
-        question=anonymizer.anonymize(kept_question, prefer=prefer),
+        question=anonymizer.anonymize(kept_question, prefer=prefer, written=written),
         removed=removed,
         question_left=bool(kept_question.strip()),
+        written=written,
     )
 
 
@@ -467,7 +476,7 @@ class Coach:
                 cost_usd=cost,
                 removed_sentences=prepared.removed,
             )
-        advice = validate_coach(result.value, hits, prepared.document, _names_as_written(question, visible))
+        advice = validate_coach(result.value, hits, prepared.document, names_as_written(prepared.written, visible))
         log.info(
             "Coach: advice for trainee %s, asked by staff %s: steps=%s grounded=%s involve=%s issues=%s removed=%s",
             trainee_id,
@@ -490,17 +499,17 @@ class Coach:
         )
 
 
-def _names_as_written(question: str, visible: set[int]) -> Callable[[Person], str]:
+def names_as_written(written: Mapping[str, Sequence[str]], visible: set[int]) -> Callable[[Person], str]:
     """Staff, and trainees the asker may see: the full name. Any other trainee: only as the asker wrote
-    them, never completed ("נדב" stays "נדב", not "נדב הררי"), so a general question cannot be used to
-    learn who is in another group (independent review, 2026-10-25)."""
+    THAT token, never completed ("נדב" stays "נדב", not "נדב הררי"), so a general question cannot be used
+    to learn who is in another group (independent review, 2026-10-25). By token, not by searching the
+    question for any form of the name: "כהן" and a different "יעל" in one question must not come back as
+    "יעל" for Cohen, which would tell the asker her first name (independent review, 2026-10-27)."""
 
     def name_for(person: Person) -> str:
         if person.kind is PersonKind.STAFF or person.id in visible:
             return person.full_name
-        for form in (person.full_name, person.first_name, person.last_name):
-            if form in question:
-                return form
-        return "חניך/ה"
+        forms = written.get(person.token)
+        return forms[0] if forms else "חניך/ה"
 
     return name_for

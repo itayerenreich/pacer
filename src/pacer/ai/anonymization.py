@@ -230,6 +230,7 @@ class Anonymizer:
         known: Iterable[Person] = (),
         prefer: Iterable[Person] = (),
         words: Sequence[tuple[int, int]] = (),
+        written: dict[str, list[str]] | None = None,
     ) -> AnonymizedText:
         """known:  people the model is told about by token even if the text never names them
                    (e.g. the participants of a meeting), so their tokens in the answer map back.
@@ -241,14 +242,20 @@ class Anonymizer:
         words:  spans (start, end) of `text` that a PERSON marked as words, not names ("טיול לאגם",
                 to the lake). They are left as written, and the final name check runs without them:
                 a person decided. Nothing in code marks a span by itself (used by the evaluation, to
-                measure what over-masking costs)."""
+                measure what over-masking costs).
+        written: filled with every person's token and the forms the text wrote them in ("כהן", not
+                 "יעל כהן"), so an answer can name a person only as the writer did (see names_as_written).
+
+        Anything in the text that LOOKS like a token is defused first ("[STAFF_2]" -> "STAFF_2"), after
+        the invisible characters are removed (so "[STAFF\u200b_2]" is defused too): only this method
+        creates tokens, and a typed or pasted one can never be restored as a person (review, 2026-10-27)."""
         people: dict[str, Person] = {person.token: person for person in known}
         preferred = frozenset(prefer)
         context = set(preferred) | set(people.values())  # grows with every name resolved in full
         unresolved: dict[str, str] = {}
         ambiguous_tokens: dict[str, str] = {}  # the same ambiguous word gets the same token
         text, marked_words = _set_aside(text, words)
-        text = _clean(text)
+        text = defuse_tokens(_clean(text))
 
         def resolve(match: re.Match) -> Person | None:
             surface, prefix = match["name"], match["prefix"]
@@ -276,6 +283,8 @@ class Anonymizer:
             person = resolve(match)
             if person is not None:
                 people[person.token] = person
+                if written is not None:
+                    written.setdefault(person.token, []).append(" ".join(match["name"].split()))
                 if len(_parts(match["name"])) > 1:  # named in full: later, "שחר" alone may be them
                     context.add(person)
                 return match["prefix"] + person.token
@@ -334,6 +343,68 @@ def deanonymize(text: str, source: AnonymizedText, name_for: Callable[[Person], 
         return source.unresolved.get(token, token)
 
     return _TOKEN.sub(restore, text)
+
+
+class AnonymizationSession:
+    """One token space for a whole conversation (stage 6: the agent).
+
+    The agent sends many texts to the model over one conversation: the counselor's message, earlier
+    turns, and the result of every tool. A person's token is stable by itself ([TRAINEE_7] is trainee 7
+    everywhere), but [NAME_n] is numbered per text: anonymized one by one, two texts would each have a
+    [NAME_1] for two different words, and the model would take them for one person. The session renumbers
+    every text's [NAME_n] into one sequence, the same word always getting the same token, and keeps every
+    token it handed out, so the final answer is restored from the whole conversation.
+
+    Text from outside (a message, a tool's result) can contain something that LOOKS like a token,
+    typed or copied. Anonymizer.anonymize defuses it ("[TRAINEE_3]" becomes "TRAINEE_3"), so it cannot
+    be restored as a name it never stood for.
+    """
+
+    def __init__(self, roster: Roster) -> None:
+        self._anonymizer = Anonymizer(roster)
+        self._people: dict[str, Person] = {}
+        self._unresolved: dict[str, str] = {}  # [NAME_n] -> the word as first written
+        self._by_word: dict[str, str] = {}  # the normalized word -> its [NAME_n]
+        self.written: dict[str, list[str]] = {}  # token -> how the ASKER wrote that person (asker=True)
+
+    def anonymize(self, text: str, *, prefer: Iterable[Person] = (), asker: bool = False) -> str:
+        """asker=True for what the staff member wrote: the forms they used for each person are kept, and
+        a person they may not see is later written back only in those forms."""
+        part = self._anonymizer.anonymize(text, prefer=prefer, written=self.written if asker else None)
+        renumber: dict[str, str] = {}
+        for token, word in part.unresolved.items():
+            key = _normalize(word)
+            if key not in self._by_word:
+                self._by_word[key] = f"[NAME_{len(self._by_word) + 1}]"
+                self._unresolved[self._by_word[key]] = word
+            renumber[token] = self._by_word[key]
+        self._people.update(part.people)
+        return _NAME_TOKEN.sub(lambda m: renumber.get(m.group(0), m.group(0)), part.text)
+
+    def view(self) -> AnonymizedText:
+        """Everything handed out so far, as one AnonymizedText: for deanonymize() and for checking that
+        a model's answer uses only tokens it was given."""
+        return AnonymizedText(
+            text="",
+            people=MappingProxyType(dict(self._people)),
+            unresolved=MappingProxyType(dict(self._unresolved)),
+            _key=_CREATED_BY_ANONYMIZER,
+        )
+
+    def word_for(self, token: str) -> str | None:
+        """The word behind a [NAME_n] token, as the counselor wrote it ("which יעל?" needs the word)."""
+        return self._unresolved.get(token)
+
+    def contains_known_name(self, text: str) -> bool:
+        return self._anonymizer.contains_known_name(text)
+
+
+_NAME_TOKEN = re.compile(r"\[NAME_\d+\]")
+
+
+def defuse_tokens(text: str) -> str:
+    """Brackets off anything that looks like a token, so only the anonymizer creates tokens."""
+    return _TOKEN.sub(lambda m: m.group(0)[1:-1], text)
 
 
 def tokens_in(text: str) -> list[str]:

@@ -50,6 +50,7 @@ class AITask(StrEnum):
     JUDGE = "judge"  # stage 4 evaluation: grades an answer or a talk summary against the answer key
     COACH_ADVICE = "coach_advice"  # stage 5: the counselor coach's advice about a trainee
     SCREEN_RISK = "screen_risk"  # stage 5: is a counselor's question a risk situation? (after the phrase list)
+    AGENT = "agent"  # stage 6: the assistant that answers by calling tools (services, library, coach)
 
 
 @dataclass(frozen=True)
@@ -97,6 +98,8 @@ ROUTES: Mapping[AITask, Route] = MappingProxyType(
         AITask.SCREEN_RISK: Route("claude-haiku", Sensitivity.ANONYMIZED, max_tokens=400),
         # The coach: the question and the trainee's approved record, anonymized and without health sentences.
         AITask.COACH_ADVICE: Route("claude-haiku", Sensitivity.ANONYMIZED, max_tokens=3000),
+        # The agent reads tool results: anonymized, health sentences removed, by the agent loop itself.
+        AITask.AGENT: Route("claude-haiku", Sensitivity.ANONYMIZED, max_tokens=2000),
     }
 )
 

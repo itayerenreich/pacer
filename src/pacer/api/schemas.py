@@ -12,14 +12,16 @@ responses that combine several objects (the result of an AI pipeline) are at the
 """
 
 from datetime import date, time
-from typing import Annotated
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
+from pacer.ai.agent import AgentOutcome, AgentResult
 from pacer.ai.answer import AskResult, Coverage
 from pacer.ai.coach import CoachOutcome, CoachResult, InvolveRole
 from pacer.ai.issues import Issue, IssueCode
 from pacer.ai.meeting_pipeline import ExtractionResult
+from pacer.ai.safety import Referral
 from pacer.ai.talk_pipeline import TalkResult
 from pacer.domain import (
     ApprovalKind,
@@ -255,6 +257,13 @@ class ReferralOut(BaseModel):
     message: str
     steps: list[ReferralStepOut]
 
+    @classmethod
+    def of(cls, referral: Referral) -> "ReferralOut":
+        return cls(
+            message=referral.message,
+            steps=[ReferralStepOut(action=s.action, contact=s.contact) for s in referral.steps],
+        )
+
 
 class AdviceStepOut(BaseModel):
     action: str
@@ -294,12 +303,7 @@ class CoachOut(BaseModel):
 
     @classmethod
     def of(cls, result: CoachResult) -> "CoachOut":
-        referral = None
-        if result.referral is not None:
-            referral = ReferralOut(
-                message=result.referral.message,
-                steps=[ReferralStepOut(action=s.action, contact=s.contact) for s in result.referral.steps],
-            )
+        referral = None if result.referral is None else ReferralOut.of(result.referral)
         advice = None
         if result.advice is not None:
             a = result.advice
@@ -322,6 +326,76 @@ class CoachOut(BaseModel):
             advice=advice,
             note=result.note,
             prompt=result.prompt_ref,
+            cost_usd=result.cost_usd,
+            removed_sentences=result.removed_sentences,
+        )
+
+
+# --- the agent (stage 6) -----------------------------------------------------------------------
+
+
+class ChatTurn(_Body):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4000)
+
+
+class AgentChat(_Body):
+    message: Question = Field(max_length=2000, examples=["איך להתמודד עם דני שלא עומד ביעדים?"])
+    history: list[ChatTurn] = Field(
+        default_factory=list,
+        max_length=20,
+        description="The conversation so far, oldest first, as the client shows it. Nothing is stored on the "
+        "server: the client sends it with every message, and only the last 10 turns are read",
+    )
+
+
+class AgentStepOut(BaseModel):
+    tool: str
+    arguments: dict[str, Any] = Field(description="What the agent asked for, with names as you may see them")
+    ok: bool
+    summary: str = Field(description="What came back, in counts: never the content itself")
+    latency_ms: int
+
+
+class SourceOut(BaseModel):
+    source_id: int
+    citation: str
+    evidence: str
+    section: str | None
+
+
+class AgentOut(BaseModel):
+    """answer: the agent's answer. referral: an exceptional incident, the procedure only. not_sent: the
+    message was only about health, so nothing was sent. stopped: a limit was reached before an answer."""
+
+    outcome: AgentOutcome
+    answer: str | None
+    referral: ReferralOut | None
+    note: str = Field(description="Shown with every answer: what to do if this may be an exceptional incident")
+    steps: list[AgentStepOut] = Field(description="What the agent looked up, in order")
+    sources: list[SourceOut] = Field(description="Library sources the agent was shown")
+    issues: list[IssueOut]
+    stopped_by: str | None = Field(description="rounds, cost or empty, when outcome is stopped")
+    model: str | None
+    prompt: str | None
+    rounds: int
+    cost_usd: float | None
+    removed_sentences: int = Field(description="Sentences about health removed before anything was sent")
+
+    @classmethod
+    def of(cls, result: AgentResult) -> "AgentOut":
+        return cls(
+            outcome=result.outcome,
+            answer=result.answer,
+            referral=None if result.referral is None else ReferralOut.of(result.referral),
+            note=result.note,
+            steps=[AgentStepOut(**vars(step)) for step in result.steps],
+            sources=[SourceOut(**vars(ref)) for ref in result.sources],
+            issues=[IssueOut.of(i) for i in result.issues],
+            stopped_by=result.stopped_by,
+            model=result.model,
+            prompt=result.prompt_ref,
+            rounds=result.rounds,
             cost_usd=result.cost_usd,
             removed_sentences=result.removed_sentences,
         )

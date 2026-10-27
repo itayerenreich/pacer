@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from pacer.api.app import create_app
 from pacer.api.dependencies import (
     get_approval_repository,
+    get_cohort_repository,
     get_db_engine,
     get_goal_repository,
     get_goal_update_repository,
@@ -46,6 +47,7 @@ def client(world: World) -> Iterator[TestClient]:
         get_goal_repository: lambda: world.goals,
         get_goal_update_repository: lambda: world.goal_updates,
         get_approval_repository: lambda: world.approvals,
+        get_cohort_repository: lambda: world.cohorts,
     }
     with TestClient(app) as test_client:
         yield test_client
@@ -304,3 +306,23 @@ def test_list_trainees_shows_only_what_the_actor_may_see(client, world):
     assert client.get("/trainees", headers=as_(world.dana)).json() == []
     assert client.get("/trainees?status=left", headers=as_(world.manager)).json() == []
     assert client.get("/trainees?status=nonsense", headers=as_(world.manager)).status_code == 422
+
+
+def test_groups_are_listed_for_any_staff_member(client):
+    response = client.get("/groups", headers={"X-Staff-Id": "2"})
+    assert response.status_code == 200
+    assert [g["name"] for g in response.json()] and all("counselor_ids" in g for g in response.json())
+    assert client.get("/groups").status_code == 401
+
+
+def test_the_web_app_serves_the_api_under_api_and_the_interface_at_the_root(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from pacer.api.web import create_web_app
+
+    (tmp_path / "index.html").write_text("<html>pacer</html>", encoding="utf-8")
+    site = TestClient(create_web_app(tmp_path))
+    assert "pacer" in site.get("/").text
+    assert site.get("/api/openapi.json").status_code == 200
+    no_build = TestClient(create_web_app(tmp_path / "missing"), follow_redirects=False)
+    assert no_build.get("/").headers["location"] == "/api/docs"

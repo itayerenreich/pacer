@@ -28,12 +28,14 @@ from fastapi import Depends, Header
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session
 
+from pacer.ai.agent import Agent
 from pacer.ai.answer import LibraryAnswerer
 from pacer.ai.coach import Coach
 from pacer.ai.embeddings import DEFAULT_EMBEDDING_MODEL, Embedder, ollama_embedder
 from pacer.ai.meeting_pipeline import MeetingPipeline
 from pacer.ai.routing import Router, get_router
 from pacer.ai.talk_pipeline import TalkPipeline
+from pacer.ai.tools import AgentTools
 from pacer.domain import StaffMember, academy_today
 from pacer.library.chunking import DEFAULT_CHUNKING
 from pacer.repositories import (
@@ -374,3 +376,18 @@ def get_coach(
 
 
 CoachDep = Annotated[Coach, Depends(get_coach)]
+
+
+def get_agent(
+    uow: UnitOfWorkDep,
+    router: Annotated[Router, Depends(get_ai_router)],
+    embedder: Annotated[Embedder, Depends(get_embedder)],
+    today: TodayDep,
+) -> Agent:
+    """The agent and its tools. The coach inside it is the same coach as /coach/ask, with its own gate."""
+    coach = Coach(uow, router, embedder, DEFAULT_CHUNKING, today=lambda: today)
+    tools = AgentTools(uow, coach, embedder, DEFAULT_CHUNKING).registry()
+    return Agent(uow, router, tools, today=lambda: today)
+
+
+AgentDep = Annotated[Agent, Depends(get_agent)]

@@ -2,9 +2,9 @@
 
 [![tests](https://github.com/itayerenreich/pacer/actions/workflows/tests.yml/badge.svg)](https://github.com/itayerenreich/pacer/actions/workflows/tests.yml)
 
-> **Work in progress.** Pacer is far from finished. The data layer, the API, the AI core and the
-> knowledge library (RAG) are built and tested; the counselor coach, the assistant and the staff
-> interface are still ahead (see [Status](#status)).
+> **Work in progress.** The data layer, the API, the AI core, the knowledge library (RAG), the counselor
+> coach, the assistant and the staff interface are built and tested. Before real users: real sign-in,
+> deployment and backups (see [Status](#status)).
 
 **In short:** Pacer helps pre-military academies (מכינות קדם-צבאיות) run their year, educate by the
 texts and values they believe in, and give their counselors practical tools for the work with each trainee.
@@ -37,17 +37,23 @@ advice about a specific trainee, built on what already worked with them and on t
 The AI sits **above** the data, never instead of it: it proposes, and a person approves every item
 before anything changes.
 
+An **assistant** answers a staff member's question by deciding for itself what to look up (their trainees,
+a trainee's record, attendance, the week, the library, the coach), with the staff member's own permissions,
+read only. A web interface in Hebrew puts it next to the trainees, the week's schedule and attendance.
+
 ## Architecture
 
 ```
-  HTTP clients (/docs, UI, agent)
+     web/            React + TypeScript interface, in Hebrew, right to left; talks only to the API
+          │
+  HTTP clients (/docs, web/)
           │
      api/            FastAPI: routing, request schemas, who is asking, errors -> HTTP codes
           │
      evaluation/     versioned answer keys (evals/), a runner, an LLM judge, reports
           │
      ai/             model routing, anonymization, structured output, the meeting and talk pipelines,
-          │          retrieval and answers with citations
+          │          retrieval and answers with citations, the coach, the agent and its tools
      library/        importing texts (Word, PDF): cleaning, chunking, a manifest per file
           │
      services/       business rules and permissions (role-based), one unit of work per request
@@ -221,10 +227,50 @@ Counselors mark each session for the trainees of their groups: **present, absent
 - **The database enforces it too:** one session per template slot and date, one mark per trainee and
   session (marking again replaces it), and the academy's "today" is Israel's, not the server's UTC.
 
+## The assistant (an agent) and the interface
+
+Everything before this is a **pipeline**: the code decides the steps. The assistant is an **agent**: the
+model decides which tools to call, and our code runs them (`POST /agent/chat`, `ai/agent.py`). Asked "how
+do I deal with Nadav Nahum, who isn't meeting his goals?", it looks up his attendance and his record, asks
+the coach (which searches the library itself), and answers.
+
+```
+message ─► phrase list (every user turn) ─► the screen ─► exceptional incident? the fixed procedure
+        ─► health sentences out, anonymized in ONE token space for the whole conversation
+        ─► loop: the model answers, or asks for tools ─► our code runs each tool as THIS staff member
+                 ─► health sentences out of the result ─► anonymized ─► back to the model
+           limits: 6 rounds, 10 tool calls, $0.25; the last round must answer in text
+        ─► the answer: health out, unknown tokens reported, names restored as the asker may see them
+```
+
+- **The model only asks; the code decides.** Seven read-only tools, each a Pydantic model (its JSON schema
+  is what the model sees) over a service that already exists. None has a "who is asking" parameter: the
+  actor is bound in code, so a trainee of another group is "not found", in the same words as one that does
+  not exist. A wrong argument is an error the model reads and corrects, never a crash.
+- **One token space per conversation.** `[TRAINEE_7]` is stable by itself, but ambiguous names were
+  numbered per text; across many tool results two different words would both be `[NAME_1]`. A session
+  renumbers them, and a token typed into a message (even with an invisible character inside) is defused.
+- **A hidden trainee is never completed.** Written back only in the form the asker wrote for that token:
+  "כהן" stays "כהן", even if the same message mentions another "יעל".
+- **Nothing about the conversation is stored.** The interface sends the history with each message; the
+  server checks it with the phrase list and anonymizes it again every time, as untrusted text.
+- **What was looked up is shown.** Under each answer, the route the agent took: each tool call as a
+  waypoint, with counts (never content), and the library sources it was shown.
+- **Measured like the rest:** `python -m pacer.evaluation agent` runs 17 cases (`evals/agent-v1.json`) and
+  checks in code the outcome, the tools it had to call and must not call, that every call was about the
+  right trainee, and the answer's text; a judge scores the checklists. Only the agent's model changes
+  between runs (`--model`), so Haiku and Sonnet are compared on choosing tools.
+
+The interface (`web/`, React + TypeScript + Vite) has four screens: the assistant, the trainees (goals,
+approved notes, attendance), the week with attendance marking, and an overview (attendance by group and by
+trainee, the lowest first; approvals waiting for the manager; tasks). It talks only to the API, so every
+permission is the API's.
+
 ## Stack
 
 Python 3.12 · uv · FastAPI · Pydantic · SQLAlchemy 2 · PostgreSQL 17 · Alembic · Docker ·
-pytest · testcontainers · GitHub Actions · LiteLLM · Claude · Ollama · pgvector
+pytest · testcontainers · GitHub Actions · LiteLLM · Claude · Ollama · pgvector ·
+React · TypeScript · Vite
 
 ## Run it
 
@@ -242,6 +288,19 @@ Open http://127.0.0.1:8000/docs. Every request needs an `X-Staff-Id` header; the
 loader prints the ids (1 is the manager). This header is a development stand-in for real
 authentication, isolated in one function so it can be replaced without touching endpoints.
 
+The interface needs [Node](https://nodejs.org) 22:
+
+```bash
+cd web && npm install && npm run dev          # http://localhost:5173 (forwards /api to the API on 8000)
+```
+
+Sign in with a staff id (the same development identity). Or everything in Docker, in one container:
+
+```bash
+docker compose --profile app up -d --build    # http://localhost:8000: the interface, and the API under /api
+docker compose exec app uv run --no-sync python -m pacer.demo   # the demo academy, once
+```
+
 AI features need `ANTHROPIC_API_KEY` in `.env` (never in Git). Try them on sample data:
 
 ```bash
@@ -252,6 +311,7 @@ uv run python -m pacer.library ask "איך מתאימים את ההדרכה לח
 uv run python -m pacer.evaluation run --limit 1 --out data/eval-try.md   # the evaluation, on one case
 uv run python -m pacer.demo.coach "נדב הררי" "איך לעזור לו להשתתף יותר בשיחות הקבוצה?"         # dry run
 uv run python -m pacer.demo.coach "נדב הררי" "איך לעזור לו להשתתף יותר בשיחות הקבוצה?" --send  # the coach
+uv run python -m pacer.evaluation agent --out data/agent-haiku.md   # the agent on its 17 cases (about $0.30)
 ```
 
 The library needs [Ollama](https://ollama.com) with `ollama pull bge-m3`, and the texts imported
@@ -273,7 +333,7 @@ uv run pytest --run-llm -m llm       # against real models: costs a fraction of 
 - **AI tests** use a fake model that records what it was sent, so tests can check that no
   known name ever reached a cloud model, and that no transaction was open during the call.
 
-CI runs ruff, mypy and the full suite on every pull request.
+CI runs ruff, mypy and the full suite on every pull request, and builds the interface (tsc and Vite).
 
 ## Status
 
@@ -284,4 +344,5 @@ CI runs ruff, mypy and the full suite on every pull request.
 | 3. AI core | LLM client, model routing, anonymization, meeting pipeline, talk summaries | done |
 | 4. Knowledge and quality | a curated library, RAG with citations, evaluation set, open vs commercial models | done |
 | 5. Counselor coach | a two-layer safety gate, the trainee's approved record, advice grounded in the library where it can be, measured | done |
-| 6. Assistant and UI | tool-using agent, staff interface, demo | planned |
+| 6. Assistant and UI | a tool-using agent over the services, the staff interface, Docker | built; measurement and demo next |
+| Before real users | real sign-in, where it runs, backups, onboarding an academy, privacy review | planned |
