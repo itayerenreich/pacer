@@ -9,6 +9,8 @@ uv run python -m pacer.evaluation safety                                   # the
 uv run python -m pacer.evaluation safety --send --out data/safety.md       # with the model screen: about $0.05
 uv run python -m pacer.evaluation coach --out data/coach-haiku.md           # the counselor coach: about $0.30
 uv run python -m pacer.evaluation coach --model claude-sonnet --out data/coach-sonnet.md
+uv run python -m pacer.evaluation agent --out data/agent-haiku.md           # the agent: about $0.30
+uv run python -m pacer.evaluation agent --model claude-sonnet --out data/agent-sonnet.md
 
 check and masking need no model. run needs ANTHROPIC_API_KEY, and Ollama for the embeddings (bge-m3).
 All read the academy from the database in .env (the demo academy: python -m pacer.demo). run writes the
@@ -18,10 +20,13 @@ Library retrieval alone (no answering model): python -m pacer.library compare ev
 
 import argparse
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 from pacer.ai import LLMError
+from pacer.ai.agent import PROMPT_VERSION as AGENT_PROMPT_VERSION
+from pacer.ai.agent import Agent
 from pacer.ai.anonymization import AnonymizationError, Anonymizer, load_roster
 from pacer.ai.answer import PROMPT_VERSION as ANSWER_PROMPT_VERSION
 from pacer.ai.answer import LibraryAnswerer
@@ -29,9 +34,10 @@ from pacer.ai.coach import PROMPT_VERSION as COACH_PROMPT_VERSION
 from pacer.ai.coach import Coach
 from pacer.ai.embeddings import DEFAULT_EMBEDDING_MODEL, ollama_embedder
 from pacer.ai.risk_screen import SafetyGate
-from pacer.ai.routing import MODELS, AITask
+from pacer.ai.routing import MODELS, ROUTES, AITask, Router
 from pacer.ai.structured import StructuredOutputError
 from pacer.ai.talk_pipeline import PROMPT_VERSION as TALK_PROMPT_VERSION
+from pacer.ai.tools import TOOL_NAMES, AgentTools
 from pacer.library.__main__ import as_document
 from pacer.library.chunking import DEFAULT_CHUNKING
 from pacer.library.manifest import load_manifest
@@ -39,6 +45,14 @@ from pacer.logging_config import configure_logging, use_utf8_console
 from pacer.repositories import get_engine, repositories
 from pacer.services import ServiceError
 
+from .agent_eval import (
+    AgentCaseResult,
+    agent_summary,
+    load_agent_set,
+    render_agent,
+    resolve_agent_cases,
+    run_agent_case,
+)
 from .coach_eval import CoachCaseResult, coach_summary, load_coach_set, render_coach, resolve_cases, run_coach_case
 from .library_set import load_library_set, unknown_sources
 from .masking import MentionResult, Outcome, measure, summary
@@ -58,6 +72,7 @@ from .talk_set import CaseError, load_talk_set, resolve
 LIBRARY_SET = Path("evals/library-v1.json")
 TALK_SET = Path("evals/talks-v1.json")
 COACH_SET = Path("evals/coach-v1.json")
+AGENT_SET = Path("evals/agent-v1.json")
 SAFETY_SETS = {"heldout": Path("evals/safety-heldout-v1.json"), "main": Path("evals/safety-v1.json")}
 MANIFESTS = [Path("library/classics.json")]
 
@@ -100,6 +115,11 @@ def check() -> str:
     lines.append(f"{coach.ref}: {len(coach.cases)} cases")
     with _uow()() as repos:
         _, problems = resolve_cases(coach, repos)
+    lines += [f"  ✗ {p}" for p in problems] or ["  ✓ every case fits the academy in the database"]
+    agent = load_agent_set(AGENT_SET)
+    lines.append(f"{agent.ref}: {len(agent.cases)} cases")
+    with _uow()() as repos:
+        _, problems = resolve_agent_cases(agent, repos, TOOL_NAMES)
     lines += [f"  ✗ {p}" for p in problems] or ["  ✓ every case fits the academy in the database"]
     return "\n".join(lines)
 
@@ -245,6 +265,13 @@ COMPARED: list[tuple[str, str, str, str]] = [
     ("מלווה: ציטוטים נתמכים", "coach", "claims_supported", "pct"),
     ("מלווה: שניות לתשובה", "coach", "seconds_per_answer", "num"),
     ("מלווה: עלות ($)", "coach", "cost_usd", "num"),
+    ("סוכן: עברו את כל הבדיקות בקוד", "agent", "passed", "pct"),
+    ("סוכן: בחירת tools נכונה", "agent", "tools_ok", "pct"),
+    ("סוכן: החניך הנכון", "agent", "trainee_ok", "pct"),
+    ("סוכן: סעיפי בדיקה (שופט)", "agent", "checklist", "pct"),
+    ("סוכן: קריאות tools לתשובה", "agent", "tool_calls_per_answer", "num"),
+    ("סוכן: שניות למקרה", "agent", "seconds_per_case", "num"),
+    ("סוכן: עלות ($)", "agent", "cost_usd", "num"),
 ]
 
 
@@ -354,6 +381,63 @@ def coach_run(model: str, *, limit: int | None, baseline: bool, judge: bool) -> 
     return render_coach(results, summary, meta), summaries
 
 
+def agent_run(model: str, *, limit: int | None, judge: bool) -> tuple[str, dict]:
+    """The agent on every case, against real models. Only the AGENT task moves to `model`: the gate, the
+    coach and the judge stay on their own routes, so the one difference between two runs is who decides."""
+    routes = {task: replace(route, model=model) if task is AITask.AGENT else route for task, route in ROUTES.items()}
+    router = Router(routes=routes, models=MODELS)
+    uow = _uow()
+    eval_set = load_agent_set(AGENT_SET)
+    embedder = ollama_embedder(DEFAULT_EMBEDDING_MODEL)
+    coach = Coach(uow, router, embedder, DEFAULT_CHUNKING)
+    tools = AgentTools(uow, coach, embedder, DEFAULT_CHUNKING).registry()
+    with uow() as repos:
+        resolved, problems = resolve_agent_cases(eval_set, repos, tools.names)
+        anonymizer = Anonymizer(load_roster(repos.staff, repos.trainees))
+        actors = {s.key: s for s in repos.staff.list_all()}
+    if problems:
+        raise SystemExit(
+            "The set does not fit this academy (load the demo: python -m pacer.demo --reset):\n" + "\n".join(problems)
+        )
+    agent = Agent(uow, router, tools)
+    judge_client = router.client_for(AITask.JUDGE) if judge else None
+    results: list[AgentCaseResult] = []
+    failed: list[str] = []
+    interrupted = False
+    try:
+        for item in resolved[:limit]:
+            print(f"agent {item.case.id} ...", flush=True)
+            try:
+                results.append(run_agent_case(item, agent, actors, judge_client, anonymizer))
+            except (LLMError, AnonymizationError, ServiceError, ValueError) as error:  # one case, not the run
+                failed.append(_failure(item.case.id, error))
+    except KeyboardInterrupt:
+        interrupted = True
+        print("\nStopped (Ctrl+C): reporting what was done so far.", flush=True)
+    summary = agent_summary(results)
+    judge_model = router.route(AITask.JUDGE).model if judge else None
+    meta = [
+        f"מודל הסוכן: **{model}** (המלווה: {router.route(AITask.COACH_ADVICE).model}, השער: "
+        f"{router.route(AITask.SCREEN_RISK).model}). שופט: **{judge_model or 'בלי'}**",
+        f"סט: {eval_set.ref}. prompt: agent@v{AGENT_PROMPT_VERSION}. שליפה: {DEFAULT_EMBEDDING_MODEL}",
+    ]
+    if interrupted:
+        meta.append("**ההרצה נעצרה באמצע (Ctrl+C):** הציונים הם רק על המקרים שהספיקו לרוץ.")
+    if failed:
+        meta.append(f"**נכשלו ({len(failed)}), ולא נכללים בציונים:** " + "; ".join(failed))
+    summaries = {
+        "model": model,
+        "judge": judge_model,
+        "when": datetime.now(UTC).isoformat(timespec="seconds"),
+        "sets": [eval_set.ref],
+        "prompts": [f"agent@v{AGENT_PROMPT_VERSION}"],
+        "agent": summary,
+        "failed": failed,
+        "interrupted": interrupted,
+    }
+    return render_agent(results, summary, meta), summaries
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="python -m pacer.evaluation", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -375,6 +459,11 @@ def main(argv: list[str] | None = None) -> None:
     coaching.add_argument("--no-baseline", action="store_true", help="skip asking again without the trainee's record")
     coaching.add_argument("--no-judge", action="store_true", help="skip the judge (code checks only)")
     coaching.add_argument("--out", type=Path, required=True, help="the report; the JSON summary goes next to it")
+    agenting = commands.add_parser("agent", help="the agent on its set, against real models (costs money)")
+    agenting.add_argument("--model", default="claude-haiku", choices=list(MODELS), help="the model that decides")
+    agenting.add_argument("--limit", type=int, help="only the first N cases")
+    agenting.add_argument("--no-judge", action="store_true", help="skip the judge (code checks only)")
+    agenting.add_argument("--out", type=Path, required=True, help="the report; the JSON summary goes next to it")
     screening = commands.add_parser("safety", help="the safety gate on a risk set (--send: with the model)")
     screening.add_argument("--set", dest="which", default="heldout", choices=list(SAFETY_SETS))
     screening.add_argument("--send", action="store_true", help="also ask the model screen (costs a few cents)")
@@ -395,6 +484,8 @@ def main(argv: list[str] | None = None) -> None:
         report, summaries = coach_run(
             args.model, limit=args.limit, baseline=not args.no_baseline, judge=not args.no_judge
         )
+    elif args.command == "agent":
+        report, summaries = agent_run(args.model, limit=args.limit, judge=not args.no_judge)
     elif args.command == "safety":
         report = safety(args.which, send=args.send)
     elif args.command == "compare":

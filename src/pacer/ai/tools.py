@@ -47,6 +47,15 @@ from .safety import REFERRAL, Referral
 
 log = logging.getLogger(__name__)
 
+TOOL_NAMES = (
+    "find_trainees",
+    "trainee_record",
+    "attendance",
+    "week_schedule",
+    "search_library",
+    "ask_coach",
+    "report_exceptional_incident",
+)  # every tool, in the order the model sees them (a test keeps this equal to the registry)
 MAX_RESULT_CHARS = 6000  # a tool's result is cut here: the model reads summaries, not databases
 MAX_TRAINEES_LISTED = 40
 
@@ -147,6 +156,7 @@ class ToolRegistry:
             except ValidationError as error:
                 raise ToolError(_validation_message(error)) from error
             output, ok = tool.run(context, params), True
+            output.text = _cut(output.text)
         except ToolError as error:
             output, ok = ToolOutput(f"Error: {error}", "error"), False
         except NotFoundError:
@@ -366,9 +376,15 @@ class AgentTools:
                         ctx.actor, cohort_id, first, ctx.today, today=ctx.today, group_id=p.group_id
                     )
                 ]
+            groups = {g.key: g.name for c in repos.cohorts.list_all() for g in repos.groups.list_by_cohort(c.key)}
         if not summaries:
             return ToolOutput("No trainee you may see.", "0 trainees")
-        lines = [f"Attendance from {first} to {ctx.today}, lowest rate first:"]
+        lines = [f"Attendance from {first} to {ctx.today}."]
+        if p.trainee_id is None:
+            # Computed here, not left to the model: averaging twenty percentages is arithmetic a model gets
+            # wrong, and a group's rate is its sessions, not the mean of its trainees' rates.
+            lines += _group_lines(summaries, groups)
+            lines.append("Each trainee, lowest rate first:")
         lines += [line for s in summaries[:MAX_TRAINEES_LISTED] for line in _attendance_lines(s)]
         if len(summaries) > MAX_TRAINEES_LISTED:
             lines.append(f"(and {len(summaries) - MAX_TRAINEES_LISTED} more)")
@@ -480,6 +496,17 @@ def _current_cohorts(cohorts: list[Cohort], day: date) -> list[Cohort]:
     if running:
         return running
     return sorted(cohorts, key=lambda c: c.start_date)[-1:]
+
+
+def _group_lines(summaries: list[AttendanceSummary], groups: dict[int, str]) -> list[str]:
+    """Each group's rate over all its counted sessions: present / (present + absent), like a trainee's."""
+    lines = []
+    for group_id in sorted({s.trainee.group_id for s in summaries}):
+        mine = [s for s in summaries if s.trainee.group_id == group_id]
+        present, counted = sum(s.present for s in mine), sum(s.counted for s in mine)
+        rate = "nothing recorded yet" if counted == 0 else f"{round(present / counted * 100, 1)}%"
+        lines.append(f"Group {groups.get(group_id, group_id)} (group_id {group_id}), {len(mine)} trainees: {rate}")
+    return lines
 
 
 def _attendance_lines(s: AttendanceSummary) -> list[str]:

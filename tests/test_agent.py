@@ -435,8 +435,9 @@ def test_attendance_of_a_group_lowest_first_with_template_sessions_only(uow, rep
     agent, cloud = build(uow, use(("attendance", {"group_id": 1})), say("זה המצב"))
     agent.chat(staff(repos, 2), "מי מגיע הכי פחות?")
     lines = cloud.chats[1].tool_results()[0].splitlines()
-    assert lines[1].startswith("- [TRAINEE_1] (trainee_id 1): 0%")
-    assert lines[2] == "  - missed: ספורט בוקר (1)"
+    assert lines[1] == "Group ארז (group_id 1), 3 trainees: 50.0%"  # its sessions: 2 of 4, not a mean of rates
+    assert lines[3].startswith("- [TRAINEE_1] (trainee_id 1): 0%")
+    assert lines[4] == "  - missed: ספורט בוקר (1)"
     assert "פגישה" not in cloud.chats[1].tool_results()[0]  # a one-off's free-text title stays off the model
 
 
@@ -553,3 +554,23 @@ def test_the_api_refuses_a_bad_request_before_any_model(api, staff_id, body, sta
     client, cloud = api
     assert chat(client, staff_id, body).status_code == status
     assert cloud.chats == [] and cloud.calls == []
+
+
+def test_a_long_tool_result_is_cut_at_a_line(uow, repos):
+    from pacer.ai.tools import MAX_RESULT_CHARS
+
+    for i in range(400):
+        repos.sessions.add(
+            ScheduledSession(cohort_id=1, on=date(2026, 10, 26), start=time(7), end=time(8), title=f"פעילות מספר {i}")
+        )
+    agent, cloud = build(uow, use("week_schedule"), say("הרבה"))
+    agent.chat(staff(repos, 2), "מה יש השבוע?")
+    result = cloud.chats[1].tool_results()[0]
+    assert len(result) <= MAX_RESULT_CHARS + 50 and result.endswith("(cut: the result was too long)")
+
+
+def test_the_tool_names_constant_is_the_registry(uow, repos):
+    from pacer.ai.tools import TOOL_NAMES
+
+    agent, _ = build(uow)
+    assert tuple(agent._tools.names) == TOOL_NAMES
