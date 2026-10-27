@@ -26,3 +26,25 @@ export function shortDate(day: string): string {
 }
 
 export const DAY_NAMES = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
+
+export function daysBetween(from: string, to: string): number {
+  const [a, b] = [from, to].map((day) => {
+    const [y, m, d] = day.split("-").map(Number);
+    return Date.UTC(y, m - 1, d);
+  });
+  return Math.round((b - a) / 86_400_000);
+}
+
+export function dayName(day: string): string {
+  const [y, m, d] = day.split("-").map(Number);
+  return DAY_NAMES[new Date(y, m - 1, d).getDay()];
+}
+
+// How a deadline reads: "היום", "מחר", "יום חמישי 29.10", "באיחור של 2 ימים".
+export function deadlineLabel(due: string, todayIs: string): string {
+  const days = daysBetween(todayIs, due);
+  if (days < 0) return days === -1 ? "באיחור של יום" : `באיחור של ${-days} ימים`;
+  if (days === 0) return "היום";
+  if (days === 1) return "מחר";
+  return `${dayName(due)} ${shortDate(due)}`;
+}

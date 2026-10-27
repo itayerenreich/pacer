@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 
-import { api, type AttendanceSummary, type Goal, type Note, type Trainee } from "../api";
+import { api, type AttendanceSummary, type Goal, type Note, type Task, type Trainee } from "../api";
 import type { Academy } from "../App";
+import { deadlineLabel, today } from "../dates";
 
 const GOAL_STATUS: Record<Goal["status"], string> = {
   not_started: "טרם התחילה",
@@ -86,14 +87,16 @@ function Profile({ trainee, academy }: { trainee: Trainee; academy: Academy }) {
   const [goals, setGoals] = useState<Goal[] | null>(null);
   const [notes, setNotes] = useState<Note[] | null>(null);
   const [attendance, setAttendance] = useState<AttendanceSummary | null>(null);
+  const [tasks, setTasks] = useState<Task[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([api.goals(trainee.id), api.notes(trainee.id), api.traineeAttendance(trainee.id)])
-      .then(([g, n, a]) => {
+    Promise.all([api.goals(trainee.id), api.notes(trainee.id), api.traineeAttendance(trainee.id), api.traineeTasks(trainee.id)])
+      .then(([g, n, a, t]) => {
         setGoals(g);
         setNotes([...n].reverse());
         setAttendance(a);
+        setTasks(t.filter((task) => task.status === "open"));
       })
       .catch((error: Error) => setProblem(error.message));
   }, [trainee.id]);
@@ -129,6 +132,20 @@ function Profile({ trainee, academy }: { trainee: Trainee; academy: Academy }) {
           </div>
         )}
       </section>
+
+      {tasks.length > 0 && (
+        <section>
+          <h3>משימות פתוחות</h3>
+          <ul className="ruled">
+            {tasks.map((t) => (
+              <li key={t.id}>
+                {t.description}
+                {t.due_date && <span className="quiet"> ({deadlineLabel(t.due_date, today())})</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section>
         <h3>מטרות</h3>

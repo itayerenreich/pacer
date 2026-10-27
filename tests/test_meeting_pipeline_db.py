@@ -96,7 +96,8 @@ def test_over_http_from_transcript_to_tasks_in_postgresql(academy):
         stored = client.get(f"/meetings/{meeting_id}", headers={"X-Staff-Id": "1"}).json()
 
     assert seen == [0]
-    assert [t["description"] for t in omer_tasks] == ["לשוחח עם אדל אזולאי על ריצות הבוקר"]
+    from_meeting = [t["description"] for t in omer_tasks if t["source_meeting_id"] is not None]  # the demo has its own too
+    assert from_meeting == ["לשוחח עם אדל אזולאי על ריצות הבוקר"]
     assert "[TRAINEE_16]" in stored["anonymized_transcript"] and "אדל" not in stored["anonymized_transcript"]
     assert "אדל אזולאי" in stored["summary"]  # names restored on this computer, then saved
 
@@ -232,7 +233,7 @@ def test_approving_the_same_proposal_twice_at_once_creates_one_task(academy, mon
 
     assert outcomes[0] is None and outcomes[1] is not None  # the second waited, then saw "approved"
     with repositories(academy) as repos:
-        assert len(repos.tasks.list_all()) == 1
+        assert len([t for t in repos.tasks.list_all() if t.source_meeting_id is not None]) == 1
 
 
 def test_deciding_the_last_two_proposals_at_once_still_closes_the_meeting(academy, monkeypatch):

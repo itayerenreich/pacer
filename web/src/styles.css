@@ -774,3 +774,161 @@ p {
   font-size: var(--step-2);
   margin-bottom: 0.75rem;
 }
+
+/* --- tasks ------------------------------------------------------------------------------------- */
+
+.new-task {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 10rem 12rem auto;
+  gap: 0.75rem;
+  align-items: end;
+  max-width: 64rem;
+  margin-bottom: 2rem;
+}
+
+.new-task.manager {
+  grid-template-columns: minmax(0, 1fr) 10rem 12rem 12rem auto;
+}
+
+.new-task label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: var(--step--1);
+  color: var(--ink-soft);
+}
+
+.new-task .error {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+@media (max-width: 860px) {
+  .new-task,
+  .new-task.manager {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .new-task .wide {
+    grid-column: 1 / -1;
+  }
+}
+
+.view-switch {
+  display: inline-flex;
+  border: 1px solid var(--contour);
+  border-radius: 6px;
+  overflow: hidden;
+  margin: 0 0 1.5rem;
+}
+
+.view-switch button {
+  background: var(--paper-raised);
+  border: 0;
+  padding: 0.35rem 0.9rem;
+  cursor: pointer;
+}
+
+.view-switch button + button {
+  border-inline-start: 1px solid var(--contour);
+}
+
+.view-switch button[aria-pressed="true"] {
+  background: var(--pine);
+  color: var(--paper-raised);
+}
+
+.task-section {
+  max-width: 52rem;
+  margin-bottom: 2rem;
+}
+
+.task-section h2 {
+  font-size: var(--step-2);
+  margin-bottom: 0.25rem;
+}
+
+.task-section .count {
+  font-family: var(--body);
+  font-size: var(--step--1);
+  color: var(--ink-soft);
+  font-weight: 400;
+}
+
+.task-section.is-late h2 {
+  color: var(--ink);
+  border-inline-start: 6px solid var(--marker);
+  padding-inline-start: 0.6rem;
+}
+
+.task {
+  display: grid;
+  grid-template-columns: 1.6rem minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.task .tick {
+  width: 1.3rem;
+  height: 1.3rem;
+  margin-top: 0.2rem;
+  border-radius: 50%;
+  border: 2px solid var(--pine);
+  background: var(--paper-raised);
+  cursor: pointer;
+  padding: 0;
+}
+
+.task .tick:hover:not(:disabled) {
+  background: var(--marker-soft);
+}
+
+.task.done .tick {
+  background: var(--pine);
+  cursor: default;
+}
+
+.task.done .task-text {
+  color: var(--ink-soft);
+  text-decoration: line-through;
+}
+
+.task-body {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.task-meta {
+  font-size: var(--step--1);
+}
+
+.task-move {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  margin-top: 0.35rem;
+}
+
+.task-move .field {
+  width: auto;
+}
+
+.task-actions {
+  display: flex;
+  gap: 1rem;
+  font-size: var(--step--1);
+  white-space: nowrap;
+}
+
+.link.danger {
+  color: var(--alarm);
+}
+
+@media (max-width: 560px) {
+  .task {
+    grid-template-columns: 1.6rem minmax(0, 1fr);
+  }
+
+  .task-actions {
+    grid-column: 2;
+  }
+}

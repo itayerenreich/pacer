@@ -261,10 +261,16 @@ message ─► phrase list (every user turn) ─► the screen ─► exceptiona
   right trainee, and the answer's text; a judge scores the checklists. Only the agent's model changes
   between runs (`--model`), so Haiku and Sonnet are compared on choosing tools.
 
-The interface (`web/`, React + TypeScript + Vite) has four screens: the assistant, the trainees (goals,
-approved notes, attendance), the week with attendance marking, and an overview (attendance by group and by
-trainee, the lowest first; approvals waiting for the manager; tasks). It talks only to the API, so every
-permission is the API's.
+The interface (`web/`, React + TypeScript + Vite) has five screens: the assistant, the trainees (goals,
+approved notes, attendance, open tasks), the week with attendance marking, tasks, and an overview
+(attendance by group and by trainee, the lowest first; approvals waiting for the manager). It talks only
+to the API, so every permission is the API's.
+
+**Tasks** come from staff meetings (the manager approves each one) or are written by hand: each staff
+member writes their own, the manager writes for anyone. A task may have a deadline (never in the past) and
+may be about a trainee, and then it shows in their profile; both the writer and the owner must be allowed
+to see that trainee. A meeting's task is never deleted, only marked done, and a closed trainee's tasks
+are deleted with their notes when the retention period ends. The agent reads them (`my_tasks`).
 
 ## Stack
 
