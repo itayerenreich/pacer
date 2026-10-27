@@ -37,3 +37,24 @@ jobs:
 
       - name: Run all tests (fast + integration)
         run: uv run pytest -v
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies exactly as locked
+        run: npm ci
+
+      - name: Type check and build (tsc, vite)
+        run: npm run build
