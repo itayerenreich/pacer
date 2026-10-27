@@ -145,7 +145,7 @@ def test_how_to_deal_with_dani_finds_him_reads_the_record_asks_the_coach_and_ans
     assert all(s.ok for s in result.steps)
     assert result.steps[2].summary == "2 צעדים, 1 מבוססי מקור"
     assert [s.citation for s in result.sources] == ['משנה תורה, הלכות תלמוד תורה (רמב"ם)']
-    assert result.note == PROCEDURE_NOTE and result.rounds == 3 and result.prompt_ref == "agent@v1"
+    assert result.note == PROCEDURE_NOTE and result.rounds == 3 and result.prompt_ref == "agent@v2"
 
 
 def test_the_model_never_reads_a_name_the_personal_file_or_anything_it_did_not_ask_for(uow, repos):
@@ -533,7 +533,7 @@ def test_the_api_answers_with_the_steps_and_the_procedure_line(api):
             "latency_ms": body["steps"][0]["latency_ms"],
         }
     ]
-    assert body["note"] == PROCEDURE_NOTE and body["prompt"] == "agent@v1" and body["rounds"] == 2
+    assert body["note"] == PROCEDURE_NOTE and body["prompt"] == "agent@v2" and body["rounds"] == 2
     assert cloud.chats[0].messages[0] == {"role": "user", "content": "שלום"}
 
 
@@ -707,7 +707,6 @@ def test_the_coach_also_restores_a_hidden_trainee_by_token():
     assert name_for(Person(PersonKind.TRAINEE, 1, "דני", "אברהם")) == "דני אברהם"
 
 
-
 # --- tasks (2026-10-27) --------------------------------------------------------------------------
 
 
@@ -715,12 +714,23 @@ def test_my_tasks_nearest_first_overdue_marked_and_the_trainee_by_token(uow, rep
     from pacer.domain import Task
 
     repos.tasks.add(Task(description="להכין את ערב המחזור", owner_id=2, created_by_id=2, due_date=date(2026, 11, 3)))
-    repos.tasks.add(Task(description="לשבת עם החניך על השעון המעורר", owner_id=2, created_by_id=2, due_date=date(2026, 10, 25), trainee_id=1))
+    repos.tasks.add(
+        Task(
+            description="לשבת עם החניך על השעון המעורר",
+            owner_id=2,
+            created_by_id=2,
+            due_date=date(2026, 10, 25),
+            trainee_id=1,
+        )
+    )
     repos.tasks.add(Task(description="משימה של דנה", owner_id=3, created_by_id=3))
     agent, cloud = build(uow, use("my_tasks"), say("הנה"))
     result = agent.chat(staff(repos, 2), "מה המשימות שלי?")
     lines = cloud.chats[1].tool_results()[0].splitlines()
-    assert lines[1] == "- OVERDUE by 2 day(s) (was due 2026-10-25) · לשבת עם החניך על השעון המעורר · about [TRAINEE_1] (trainee_id 1)"
+    assert (
+        lines[1]
+        == "- OVERDUE by 2 day(s) (was due 2026-10-25) · לשבת עם החניך על השעון המעורר · about [TRAINEE_1] (trainee_id 1)"
+    )
     assert lines[2].startswith("- due 2026-11-03 (in 7 day(s)) · להכין את ערב המחזור")
     assert "דנה" not in "\n".join(lines) and result.steps[0].summary == "2 משימות, 1 באיחור"
 
@@ -729,3 +739,23 @@ def test_everyones_tasks_are_the_managers_only(uow, repos):
     agent, cloud = build(uow, use(("my_tasks", {"everyone": True})), say("לא"))
     agent.chat(staff(repos, 2), "מה המשימות של כולם?")
     assert cloud.chats[1].tool_results()[0].startswith("Error: Not allowed")
+
+
+# --- who sent the procedure (for the evaluation, 2026-10-27) -------------------------------------
+
+
+def test_the_result_says_who_sent_the_procedure(uow, repos):
+    agent, _ = build(uow, say("..."))
+    assert agent.chat(staff(repos, 2), "דני אמר לי שהוא רוצה למות").referral_by == "phrases"
+    risk = json.dumps({"risk": True, "kinds": ["self_harm"], "reason": "a goodbye letter"})
+    agent, _ = build(uow, say("..."), answers=[risk])
+    by_screen = agent.chat(staff(repos, 2), "דני מתנהג מוזר השבוע")
+    assert (by_screen.referral_by, by_screen.screen_reason) == ("model", "a goodbye letter")
+    agent, _ = build(uow, use("report_exceptional_incident"), say("..."))
+    assert agent.chat(staff(repos, 2), "מה עם דני?").referral_by == "report_exceptional_incident"
+
+
+def test_the_screens_reason_never_reaches_the_api(uow, repos):
+    from pacer.api.schemas import AgentOut
+
+    assert "screen_reason" not in AgentOut.model_fields and "referral_by" not in AgentOut.model_fields

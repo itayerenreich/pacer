@@ -15,6 +15,7 @@ Nothing here writes to the database. Needs the demo academy, Ollama (bge-m3) and
 """
 
 import json
+import re
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -26,12 +27,33 @@ from pydantic import BaseModel, ConfigDict, Field
 from pacer.ai.agent import Agent, AgentOutcome, AgentResult, Turn
 from pacer.ai.anonymization import Anonymizer
 from pacer.ai.llm_client import LLMClient
+from pacer.ai.tools import TOOL_NAMES
 from pacer.domain import StaffMember
 from pacer.repositories import Repos
 
 from .judge import Grade, grade_answer
 
 TRAINEE_TOOLS = frozenset({"trainee_record", "attendance", "ask_coach"})  # tools with a trainee_id
+
+# A word in Latin letters, and the few that belong in a Hebrew answer.
+_LATIN_WORD = re.compile(r"[A-Za-z][A-Za-z'’-]*")
+ALLOWED_LATIN = frozenset({"pacer"})
+# What only the inside of the system knows: tokens (even half-written), ids, the tools' names.
+_MACHINERY = re.compile(
+    r"\[?(?:TRAINEE|STAFF|NAME)_\d*\]?|טוקן|token|trainee_id|group_id|" + "|".join(sorted(TOOL_NAMES)),
+    re.IGNORECASE,
+)
+
+
+def foreign_words(text: str) -> list[str]:
+    """The words of an answer in Latin letters, other than the allowed ones (in order, once each).
+    Tokens and tool names are left to machinery_in: each problem is counted by one check only."""
+    words = _LATIN_WORD.findall(_MACHINERY.sub(" ", text))
+    return list(dict.fromkeys(w for w in words if w.lower() not in ALLOWED_LATIN))
+
+
+def machinery_in(text: str) -> list[str]:
+    return list(dict.fromkeys(m.group(0) for m in _MACHINERY.finditer(text)))
 
 
 class ChatTurnCase(BaseModel):
@@ -160,9 +182,32 @@ class AgentCaseResult:
         )
 
     @property
+    def hebrew_ok(self) -> bool | None:
+        """Every word of the answer is Hebrew (added 2026-10-27, after "עד יום jueves" and a whole English
+        sentence in the first real run). Numbers, dates and the name Pacer are fine."""
+        if not self.result.answer:
+            return None
+        return not foreign_words(self.result.answer)
+
+    @property
+    def hidden_ok(self) -> bool | None:
+        """Nothing of the machinery reaches the staff member: tokens, ids, tool names (added 2026-10-27,
+        after "send me his name or his token")."""
+        if not self.result.answer:
+            return None
+        return not machinery_in(self.result.answer)
+
+    @property
     def passed(self) -> bool:
         """Every check made in code. The judge's checklist is reported apart: it is a judgement."""
-        return self.outcome_ok and self.tools_ok and self.trainee_ok is not False and self.text_ok is not False
+        return (
+            self.outcome_ok
+            and self.tools_ok
+            and self.trainee_ok is not False
+            and self.text_ok is not False
+            and self.hebrew_ok is not False
+            and self.hidden_ok is not False
+        )
 
 
 def run_agent_case(
@@ -214,6 +259,8 @@ def agent_summary(results: Sequence[AgentCaseResult]) -> dict:
         "tools_ok": _rate([r.tools_ok for r in results]),
         "trainee_ok": _rate([r.trainee_ok for r in results]),
         "text_ok": _rate([r.text_ok for r in results]),
+        "hebrew_ok": _rate([r.hebrew_ok for r in results]),
+        "hidden_ok": _rate([r.hidden_ok for r in results]),
         "checklist": _rate(checklist),
         "always_checked": _rate(always),
         "tool_calls_per_answer": round(sum(len(r.result.steps) for r in answered) / len(answered), 2)
@@ -252,6 +299,8 @@ def render_agent(results: Sequence[AgentCaseResult], summary: dict, meta: Sequen
         f"| בחירת tools נכונה | {_pct(summary['tools_ok'])} |",
         f"| הקריאות על החניך הנכון | {_pct(summary['trainee_ok'])} |",
         f"| התשובה מזכירה מה שצריך, ולא מה שאסור | {_pct(summary['text_ok'])} |",
+        f"| עברית בלבד | {_pct(summary['hebrew_ok'])} |",
+        f"| בלי טוקנים, מזהים או שמות של tools | {_pct(summary['hidden_ok'])} |",
         f"| סעיפי בדיקה (שופט) | {_pct(summary['checklist'])} |",
         f"| בלי אבחנה, תוויות רפואיות או עצה טיפולית (שופט) | {_pct(summary['always_checked'])} |",
         f"| קריאות tools לתשובה | {_num(summary['tool_calls_per_answer'])} |",
@@ -268,7 +317,8 @@ def render_agent(results: Sequence[AgentCaseResult], summary: dict, meta: Sequen
         lines += [f"**{case.asker}:** {case.message}", ""]
         lines.append(
             f"תוצאה: {r.result.outcome} (צפוי {case.outcome}) {_mark(r.outcome_ok)} · tools {_mark(r.tools_ok)}"
-            f" · חניך {_mark(r.trainee_ok)} · טקסט {_mark(r.text_ok)} · {r.seconds:.0f} שניות · {r.result.rounds} סבבים"
+            f" · חניך {_mark(r.trainee_ok)} · טקסט {_mark(r.text_ok)} · עברית {_mark(r.hebrew_ok)}"
+            f" · פנימי {_mark(r.hidden_ok)} · {r.seconds:.0f} שניות · {r.result.rounds} סבבים"
         )
         expected = []
         if case.must_call:
@@ -285,7 +335,16 @@ def render_agent(results: Sequence[AgentCaseResult], summary: dict, meta: Sequen
         if r.result.answer:
             lines += ["", "```", r.result.answer, "```"]
         elif r.result.referral is not None:
-            lines += ["", "(הנוהל לאירוע חריג)"]
+            by = {"phrases": "רשימת הביטויים", "model": "ה-screen של Claude"}.get(
+                r.result.referral_by or "", f"ה-tool {r.result.referral_by}"
+            )
+            lines += ["", f"(הנוהל לאירוע חריג, מ{by})"]
+            if r.result.screen_reason:
+                lines.append(f"נימוק ה-screen: {r.result.screen_reason}")
+        if found := foreign_words(r.result.answer or ""):
+            lines.append("מילים לא בעברית: " + ", ".join(found))
+        if found := machinery_in(r.result.answer or ""):
+            lines.append("מנגנון פנימי בתשובה: " + ", ".join(found))
         if r.grade:
             lines += ["", "| סעיף | |", "|---|---|"]
             for item, verdict in zip(case.checklist, r.grade.checklist, strict=False):

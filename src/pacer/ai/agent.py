@@ -58,7 +58,7 @@ from .tools import SourceRef, ToolContext, ToolRegistry, ToolRun
 
 log = logging.getLogger(__name__)
 
-PROMPT_VERSION = 1
+PROMPT_VERSION = 2  # v2 (2026-10-27): after the first real run, see prompts/agent/v2.md
 
 MAX_ROUNDS = 6  # model calls per message; the last one must answer in text
 MAX_TOOL_CALLS = 10
@@ -112,6 +112,10 @@ class AgentResult:
     rounds: int = 0
     cost_usd: float | None = 0.0
     removed_sentences: int = 0
+    # Who sent the procedure: "phrases", "model" (the screen) or the tool's name. With the screen's one
+    # sentence of reason (no names, by its prompt). For the logs and the evaluation; never in the API.
+    referral_by: str | None = None
+    screen_reason: str | None = field(default=None, repr=False)
 
 
 # An unknown cost (a model missing from the price table) is reported as unknown, but the CAP cannot
@@ -179,7 +183,7 @@ class Agent:
         found = check_safety(message, *(t.content for t in history if t.role == "user"))
         if found.is_risk:
             log.warning("Agent: referral (by phrases), staff %s", actor.id)
-            return AgentResult(AgentOutcome.REFERRAL, referral=referral_for(found))
+            return AgentResult(AgentOutcome.REFERRAL, referral=referral_for(found), referral_by="phrases")
 
         # 1. One short read: who exists (names to hide) and whom this actor may see.
         with self._uow() as repos:
@@ -196,7 +200,13 @@ class Agent:
         cost.add(decision.cost_usd)
         if decision.is_risk:
             log.warning("Agent: referral (by %s), staff %s", decision.found_by, actor.id)
-            return AgentResult(AgentOutcome.REFERRAL, referral=decision.referral, cost_usd=cost.total)
+            return AgentResult(
+                AgentOutcome.REFERRAL,
+                referral=decision.referral,
+                cost_usd=cost.total,
+                referral_by=str(decision.found_by),
+                screen_reason=decision.reason,
+            )
 
         # 3. Minimize and anonymize every turn, in one token space. What the staff member wrote is marked
         #    as theirs (asker=True): a trainee they may not see is written back only in their own words.
@@ -271,6 +281,7 @@ class Agent:
                     if run.output.stop is not None:
                         log.warning("Agent: referral (by the %s tool), staff %s", run.name, actor.id)
                         result.outcome, result.referral = AgentOutcome.REFERRAL, run.output.stop
+                        result.referral_by = run.name
                         return result
                     messages.append(_tool_message(call.id, self._tool_text(run, session, result)))
             log.warning("Agent: stopped by the %s limit, staff %s", result.stopped_by, actor.id)

@@ -262,7 +262,7 @@ Claude Sonnet scored the same at 16 times the cost, so Haiku stays. **0% grounde
 the demo library holds five classical texts on education, and no passage was close enough to these
 practical questions, so every step is marked general advice.
 
-**The agent** (`agent@v1`, 19 cases) is checked in code for the outcome, the tools it had to call and must
+**The agent** (`agent@v2`, 19 cases) is checked in code for the outcome, the tools it had to call and must
 not call, that every call was about the right trainee, and the answer's text, with a judge for the
 checklists. Only the agent's model changes between runs (`--model`), so Haiku and Sonnet are compared on
 choosing tools.
