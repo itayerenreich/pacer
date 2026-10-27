@@ -7,6 +7,7 @@ one that fails, which proves these tests never touch a database.
 """
 
 from collections.abc import Iterator
+from datetime import date
 
 import pytest
 from fakes import World
@@ -22,6 +23,8 @@ from pacer.api.dependencies import (
     get_group_repository,
     get_personal_file_repository,
     get_staff_repository,
+    get_task_repository,
+    get_today,
     get_trainee_repository,
 )
 from pacer.domain import GoalStatus, StaffMember, TraineeStatus
@@ -48,6 +51,8 @@ def client(world: World) -> Iterator[TestClient]:
         get_goal_update_repository: lambda: world.goal_updates,
         get_approval_repository: lambda: world.approvals,
         get_cohort_repository: lambda: world.cohorts,
+        get_task_repository: lambda: world.tasks,
+        get_today: lambda: date(2026, 10, 27),
     }
     with TestClient(app) as test_client:
         yield test_client
@@ -326,3 +331,41 @@ def test_the_web_app_serves_the_api_under_api_and_the_interface_at_the_root(tmp_
     assert site.get("/api/openapi.json").status_code == 200
     no_build = TestClient(create_web_app(tmp_path / "missing"), follow_redirects=False)
     assert no_build.get("/").headers["location"] == "/api/docs"
+
+
+
+# --- tasks written by hand (2026-10-27) ----------------------------------------------------------
+
+
+def test_write_a_task_change_its_deadline_and_delete_it(client, world):
+    body = {"description": "  לדבר עם יעל על הריצה  ", "due_date": "2026-10-29", "trainee_id": world.yael.id}
+    created = client.post("/tasks", json=body, headers=as_(world.noa))
+    assert created.status_code == 201
+    task = created.json()
+    assert (task["description"], task["owner_id"], task["trainee_id"]) == ("לדבר עם יעל על הריצה", world.noa.id, world.yael.id)
+    assert [t["id"] for t in client.get(f"/trainees/{world.yael.id}/tasks", headers=as_(world.noa)).json()] == [task["id"]]
+    changed = client.patch(f"/tasks/{task['id']}", json={"due_date": None}, headers=as_(world.noa))
+    assert changed.status_code == 200 and changed.json()["due_date"] is None
+    assert client.delete(f"/tasks/{task['id']}", headers=as_(world.noa)).status_code == 204
+    assert client.get("/tasks/mine", headers=as_(world.noa)).json() == []
+
+
+@pytest.mark.parametrize(
+    ("who", "body", "status"),
+    [
+        ("noa", {"description": "לקחת את יעל לרופא ביום חמישי"}, 422),  # health is never kept
+        ("noa", {"description": "    "}, 422),
+        ("noa", {"description": "משימה רגילה", "due_date": "2026-10-26"}, 409),  # already passed
+        ("noa", {"description": "משימה רגילה", "owner_id": 4}, 403),
+        ("dana", {"description": "משימה רגילה", "trainee_id": 1}, 404),
+        ("noa", {"description": "משימה רגילה", "status": "done"}, 422),
+    ],
+)
+def test_a_task_that_cannot_be_written(client, world, who, body, status):
+    assert client.post("/tasks", json=body, headers=as_(getattr(world, who))).status_code == status
+    assert world.tasks.rows == {}
+
+
+def test_staff_are_listed_for_any_staff_member(client, world):
+    names = [s["full_name"] for s in client.get("/staff", headers=as_(world.noa)).json()]
+    assert "Dana Katz" in names and client.get("/staff").status_code == 401

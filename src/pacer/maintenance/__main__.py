@@ -34,16 +34,20 @@ def main(argv: list[str] | None = None, *, now: datetime | None = None) -> int:
     configure_logging()
     now, keep_for = now or datetime.now(UTC), timedelta(days=args.days)
     with repositories(get_engine()) as repos:  # one transaction: all or nothing
-        plan = past_retention(repos.trainees, repos.notes, repos.talks, now=now, keep_for=keep_for)
-        done = purge(repos.trainees, repos.notes, repos.talks, plan, now=now, keep_for=keep_for) if args.yes else None
+        plan = past_retention(repos.trainees, repos.notes, repos.talks, repos.tasks, now=now, keep_for=keep_for)
+        done = (
+            purge(repos.trainees, repos.notes, repos.talks, repos.tasks, plan, now=now, keep_for=keep_for)
+            if args.yes
+            else None
+        )
     # Printed only after the block: by now the transaction has committed (or raised).
     print(
-        f"{plan.note_count} notes and {plan.talk_count} talks of {len(plan.trainee_ids)} trainees "
-        f"are past {args.days} days"
+        f"{plan.note_count} notes, {plan.talk_count} talks and {plan.task_count} tasks "
+        f"of {len(plan.trainee_ids)} trainees are past {args.days} days"
     )
-    if done is not None and (done.note_count or done.talk_count):
-        print(f"Deleted {done.note_count} notes and {done.talk_count} talks.")
-    elif plan.note_count or plan.talk_count:
+    if done is not None and done.trainee_ids:
+        print(f"Deleted {done.note_count} notes, {done.talk_count} talks and {done.task_count} tasks.")
+    elif plan.trainee_ids:
         print("Nothing was deleted. Run again with --yes to delete them.")
     return 0
 

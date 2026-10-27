@@ -35,6 +35,7 @@ from pacer.domain import (
     ScheduleSlot,
     StaffMember,
     StaffRole,
+    Task,
     Trainee,
     TraineeNote,
     TraineeStatus,
@@ -65,6 +66,7 @@ class Summary:
     slot_count: int = 0
     session_count: int = 0
     attendance_count: int = 0
+    task_count: int = 0
     approvals: list[ApprovalRequest] = field(default_factory=list)
 
     @property
@@ -72,9 +74,7 @@ class Summary:
         return Counter(t.status for t in self.trainees)
 
 
-def build_academy(
-    repos: Repos, *, seed: int = 2026, as_of: datetime | None = None, schedule: bool = True
-) -> Summary:
+def build_academy(repos: Repos, *, seed: int = 2026, as_of: datetime | None = None, schedule: bool = True) -> Summary:
     """Create the whole academy through `repos`. The caller owns the unit of work.
     schedule=False: without the weekly schedule and its ~1,700 attendance marks. For tests that do
     not need them (most): building them before every test was half the fast suite's time."""
@@ -95,9 +95,7 @@ class _Builder:
         self.history_ends: dict[int, datetime] = {}  # trainees whose story stops early (left)
 
     def build(self) -> Summary:
-        cohort = self.r.cohorts.add(
-            Cohort(name=content.COHORT_NAME, start_date=COHORT_START, end_date=COHORT_END)
-        )
+        cohort = self.r.cohorts.add(Cohort(name=content.COHORT_NAME, start_date=COHORT_START, end_date=COHORT_END))
         manager = self.r.staff.add(StaffMember(full_name=content.MANAGER_NAME, role=StaffRole.MANAGER))
         counselors = [
             self.r.staff.add(StaffMember(full_name=name, role=StaffRole.COUNSELOR, responsibility_area=area))
@@ -135,6 +133,7 @@ class _Builder:
             self._add_goals(trainee, summary)
         self._add_approvals(summary, requests)
         self._add_notes(summary)
+        self._add_tasks(summary)
         if self.schedule:
             _Schedule(self.r, random.Random(self.seed + 1), self.now, cohort, summary).build()
         return summary
@@ -164,9 +163,9 @@ class _Builder:
         categories = self.rng.sample(list(GoalCategory), self.rng.randint(2, 4))
         for category in categories:
             created = FIRST_DAY + timedelta(days=self.rng.randint(2, 14), hours=self.rng.randint(0, 9))
-            outcome = self.rng.choices(
-                ["achieved", "in_progress", "not_started", "dropped"], weights=[20, 60, 12, 8]
-            )[0]
+            outcome = self.rng.choices(["achieved", "in_progress", "not_started", "dropped"], weights=[20, 60, 12, 8])[
+                0
+            ]
             steps = self._progress_steps(outcome)
             end = self.history_ends.get(trainee.key, self.now)
             times = self._update_times(created, end, len(steps))
@@ -245,6 +244,27 @@ class _Builder:
                     )
                 )
                 summary.note_count += 1
+
+    def _add_tasks(self, summary: Summary) -> None:
+        """content.TASKS, with deadlines around the academy's today. Written three days ago, so one of
+        them is already overdue, as happens. No randomness: the rest of the academy is unchanged."""
+        today = self.now.astimezone(ACADEMY_TIMEZONE).date()
+        staff = {s.full_name: s for s in [summary.manager, *summary.counselors]}
+        trainees = {t.full_name: t for t in summary.trainees}
+        written = self.now - timedelta(days=3)
+        for owner, writer, text, days, about, done in content.TASKS:
+            if about is not None and about not in trainees:
+                continue  # another seed, other names (like the notes)
+            task = Task(
+                description=text,
+                owner_id=staff[owner].key,
+                created_by_id=staff[writer].key,
+                due_date=None if days is None else today + timedelta(days=days),
+                trainee_id=None if about is None else trainees[about].key,
+                created_at=written,
+            )
+            self.r.tasks.add(task.complete() if done else task)
+            summary.task_count += 1
 
     # --- approvals and the statuses they changed ----------------------------------------
 
@@ -429,4 +449,3 @@ class _Schedule:
         if roll < content.EXCUSED:
             return AttendanceStatus.EXCUSED
         return AttendanceStatus.ABSENT if roll < content.EXCUSED + absent else AttendanceStatus.PRESENT
-

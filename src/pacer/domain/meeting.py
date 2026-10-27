@@ -137,7 +137,9 @@ class ProposedTask(Entity):
 
 
 class Task(Entity):
-    """A real task: approved by the manager, owned by one staff member."""
+    """A real task, owned by one staff member. It comes from a staff meeting (a proposal the manager
+    approved), or is written by hand (2026-10-27): by a staff member for themselves, or by the manager
+    for anyone."""
 
     model_config = ConfigDict(validate_assignment=True)
 
@@ -145,8 +147,9 @@ class Task(Entity):
     owner_id: int
     due_date: date | None = None
     status: TaskStatus = TaskStatus.OPEN
-    created_by_id: int  # the manager who approved it
-    source_meeting_id: int | None = None
+    created_by_id: int  # the manager who approved it, or whoever wrote it by hand
+    source_meeting_id: int | None = None  # None: written by hand
+    trainee_id: int | None = None  # the trainee it is about, if any: shown in their profile too
     created_at: AwareDatetime = Field(default_factory=_now)
     completed_at: AwareDatetime | None = None
 
@@ -159,3 +162,13 @@ class Task(Entity):
     def complete(self) -> Self:
         require_transition(TASK_TRANSITIONS, self.status, T.DONE, "task")
         return self.model_validate({**self.model_dump(), "status": T.DONE, "completed_at": _now()})
+
+    def with_due_date(self, due_date: date | None) -> Self:
+        """A new deadline (or none). Only while the task is open: a done task's history stays as it was."""
+        if self.status is not T.OPEN:
+            raise DomainRuleError(f"Task {self.id} is {self.status}: its deadline no longer changes")
+        return self.model_validate({**self.model_dump(), "due_date": due_date})
+
+    @property
+    def written_by_hand(self) -> bool:
+        return self.source_meeting_id is None

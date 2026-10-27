@@ -256,7 +256,7 @@ message ─► phrase list (every user turn) ─► the screen ─► exceptiona
   server checks it with the phrase list and anonymizes it again every time, as untrusted text.
 - **What was looked up is shown.** Under each answer, the route the agent took: each tool call as a
   waypoint, with counts (never content), and the library sources it was shown.
-- **Measured like the rest:** `python -m pacer.evaluation agent` runs 17 cases (`evals/agent-v1.json`) and
+- **Measured like the rest:** `python -m pacer.evaluation agent` runs 19 cases (`evals/agent-v1.json`) and
   checks in code the outcome, the tools it had to call and must not call, that every call was about the
   right trainee, and the answer's text; a judge scores the checklists. Only the agent's model changes
   between runs (`--model`), so Haiku and Sonnet are compared on choosing tools.
@@ -311,7 +311,7 @@ uv run python -m pacer.library ask "איך מתאימים את ההדרכה לח
 uv run python -m pacer.evaluation run --limit 1 --out data/eval-try.md   # the evaluation, on one case
 uv run python -m pacer.demo.coach "נדב הררי" "איך לעזור לו להשתתף יותר בשיחות הקבוצה?"         # dry run
 uv run python -m pacer.demo.coach "נדב הררי" "איך לעזור לו להשתתף יותר בשיחות הקבוצה?" --send  # the coach
-uv run python -m pacer.evaluation agent --out data/agent-haiku.md   # the agent on its 17 cases (about $0.30)
+uv run python -m pacer.evaluation agent --out data/agent-haiku.md   # the agent on its 19 cases (about $0.30)
 ```
 
 The library needs [Ollama](https://ollama.com) with `ollama pull bge-m3`, and the texts imported

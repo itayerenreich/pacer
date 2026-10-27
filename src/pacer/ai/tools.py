@@ -25,7 +25,17 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from pacer.domain import Cohort, DomainRuleError, StaffMember, Trainee, TraineeStatus, Weekday, week_start
+from pacer.domain import (
+    Cohort,
+    DomainRuleError,
+    StaffMember,
+    Task,
+    TaskStatus,
+    Trainee,
+    TraineeStatus,
+    Weekday,
+    week_start,
+)
 from pacer.repositories import UnitOfWork
 from pacer.services import (
     AttendanceService,
@@ -35,8 +45,10 @@ from pacer.services import (
     PermissionDeniedError,
     RuleViolationError,
     ScheduleService,
+    TaskService,
     TraineeService,
 )
+from pacer.services.visibility import visible_trainee
 
 from .anonymization import AnonymizationSession, Person, PersonKind, deanonymize
 from .coach import Coach, CoachOutcome, trainee_lines
@@ -54,6 +66,7 @@ TOOL_NAMES = (
     "week_schedule",
     "search_library",
     "ask_coach",
+    "my_tasks",
     "report_exceptional_incident",
 )  # every tool, in the order the model sees them (a test keeps this equal to the registry)
 MAX_RESULT_CHARS = 6000  # a tool's result is cut here: the model reads summaries, not databases
@@ -254,6 +267,11 @@ class AskCoach(_Params):
     )
 
 
+class MyTasks(_Params):
+    include_done: bool = Field(default=False, description="Also the tasks already done")
+    everyone: bool = Field(default=False, description="Every staff member's tasks: the manager only")
+
+
 class ReportIncident(_Params):
     pass
 
@@ -316,6 +334,13 @@ class AgentTools:
                     "general advice. Use it for 'how should I deal with...' questions.",
                     AskCoach,
                     self.ask_coach,
+                ),
+                Tool(
+                    "my_tasks",
+                    "The asker's tasks with their deadlines, the nearest first, and which are overdue. Each may "
+                    "be about a trainee. The manager can ask for everyone's. Read only: tasks are written in Pacer.",
+                    MyTasks,
+                    self.my_tasks,
                 ),
                 Tool(
                     "report_exceptional_incident",
@@ -491,11 +516,55 @@ class AgentTools:
             cost_usd=result.cost_usd,
         )
 
+    # -- tasks ------------------------------------------------------------------------------------
+
+    def my_tasks(self, ctx: ToolContext, p: MyTasks) -> ToolOutput:
+        with self._uow() as repos:
+            service = TaskService(repos.tasks, repos.staff, repos.trainees, repos.groups)
+            tasks = service.all_tasks(ctx.actor) if p.everyone else service.my_tasks(ctx.actor)  # 403 for others
+            staff = {s.key: s.full_name for s in repos.staff.list_all()}
+            seen: dict[int, Trainee | None] = {}
+            for task in tasks:
+                if task.trainee_id is not None and task.trainee_id not in seen:
+                    try:  # the trainee's name only if the asker may see them (a group may have changed since)
+                        seen[task.trainee_id] = visible_trainee(
+                            ctx.actor, repos.trainees, repos.groups, task.trainee_id
+                        )
+                    except NotFoundError:
+                        seen[task.trainee_id] = None
+        if not p.include_done:
+            tasks = [t for t in tasks if t.status is TaskStatus.OPEN]
+        if not tasks:
+            return ToolOutput("No tasks.", "אין משימות")
+        lines = [f"{len(tasks)} task(s), the nearest deadline first (today is {ctx.today}):"]
+        for task in tasks[:MAX_TRAINEES_LISTED]:
+            parts = [_deadline(task, ctx.today), task.description]
+            if p.everyone:
+                parts.append(f"owner: {staff.get(task.owner_id, task.owner_id)}")
+            if (trainee := seen.get(task.trainee_id) if task.trainee_id is not None else None) is not None:
+                parts.append(f"about {trainee.full_name} (trainee_id {trainee.key})")
+            lines.append("- " + " · ".join(parts))  # one task per line: a line about health goes alone
+        about = [_person(t) for t in seen.values() if t is not None]
+        overdue = sum(t.status is TaskStatus.OPEN and t.due_date is not None and t.due_date < ctx.today for t in tasks)
+        summary = f"{len(tasks)} משימות" + (f", {overdue} באיחור" if overdue else "")
+        return ToolOutput("\n".join(lines), summary, about=about)
+
     def report_incident(self, ctx: ToolContext, p: ReportIncident) -> ToolOutput:
         return ToolOutput("The procedure is shown.", "הפניה לנוהל", stop=REFERRAL)
 
 
 # --- helpers -------------------------------------------------------------------------------------
+
+
+def _deadline(task: Task, today: date) -> str:
+    if task.status is TaskStatus.DONE:
+        return "DONE"
+    if task.due_date is None:
+        return "no deadline"
+    days = (task.due_date - today).days
+    if days < 0:
+        return f"OVERDUE by {-days} day(s) (was due {task.due_date})"
+    return f"due {task.due_date} (" + ("today" if days == 0 else f"in {days} day(s)") + ")"
 
 
 def _trainees(n: int) -> str:

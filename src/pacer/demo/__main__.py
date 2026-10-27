@@ -57,7 +57,7 @@ def print_summary(summary: Summary) -> None:
         f"\nLoaded: {len(summary.trainees)} trainees, {summary.goal_count} goals, "
         f"{summary.update_count} progress updates, {summary.note_count} approved notes, "
         f"{len(summary.approvals)} approval requests, {summary.slot_count} weekly slots, "
-        f"{summary.session_count} sessions, {summary.attendance_count} attendance marks"
+        f"{summary.session_count} sessions, {summary.attendance_count} attendance marks, {summary.task_count} tasks"
     )
     print("Trainee statuses:", ", ".join(f"{s}={n}" for s, n in sorted(summary.trainee_statuses.items())))
     print("\nTry the API at http://127.0.0.1:8000/docs with X-Staff-Id:")
@@ -72,7 +72,9 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="python -m pacer.demo", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--reset", action="store_true", help="delete the academy's data before loading (the library stays)")
+    parser.add_argument(
+        "--reset", action="store_true", help="delete the academy's data before loading (the library stays)"
+    )
     parser.add_argument("--seed", type=int, default=2026, help="a different seed makes a different academy")
     args = parser.parse_args(argv)
 

@@ -190,6 +190,7 @@ def test_every_tool_is_offered_with_a_closed_schema(uow, repos):
         "week_schedule",
         "search_library",
         "ask_coach",
+        "my_tasks",
         "report_exceptional_incident",
     }
     assert all(schema["additionalProperties"] is False for schema in tools.values())
@@ -704,3 +705,27 @@ def test_the_coach_also_restores_a_hidden_trainee_by_token():
     assert name_for(Person(PersonKind.TRAINEE, 4, "יעל", "כהן")) == "כהן"
     assert name_for(Person(PersonKind.TRAINEE, 9, "x", "y")) == "חניך/ה"
     assert name_for(Person(PersonKind.TRAINEE, 1, "דני", "אברהם")) == "דני אברהם"
+
+
+
+# --- tasks (2026-10-27) --------------------------------------------------------------------------
+
+
+def test_my_tasks_nearest_first_overdue_marked_and_the_trainee_by_token(uow, repos):
+    from pacer.domain import Task
+
+    repos.tasks.add(Task(description="להכין את ערב המחזור", owner_id=2, created_by_id=2, due_date=date(2026, 11, 3)))
+    repos.tasks.add(Task(description="לשבת עם החניך על השעון המעורר", owner_id=2, created_by_id=2, due_date=date(2026, 10, 25), trainee_id=1))
+    repos.tasks.add(Task(description="משימה של דנה", owner_id=3, created_by_id=3))
+    agent, cloud = build(uow, use("my_tasks"), say("הנה"))
+    result = agent.chat(staff(repos, 2), "מה המשימות שלי?")
+    lines = cloud.chats[1].tool_results()[0].splitlines()
+    assert lines[1] == "- OVERDUE by 2 day(s) (was due 2026-10-25) · לשבת עם החניך על השעון המעורר · about [TRAINEE_1] (trainee_id 1)"
+    assert lines[2].startswith("- due 2026-11-03 (in 7 day(s)) · להכין את ערב המחזור")
+    assert "דנה" not in "\n".join(lines) and result.steps[0].summary == "2 משימות, 1 באיחור"
+
+
+def test_everyones_tasks_are_the_managers_only(uow, repos):
+    agent, cloud = build(uow, use(("my_tasks", {"everyone": True})), say("לא"))
+    agent.chat(staff(repos, 2), "מה המשימות של כולם?")
+    assert cloud.chats[1].tool_results()[0].startswith("Error: Not allowed")

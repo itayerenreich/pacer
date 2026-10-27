@@ -14,7 +14,7 @@ responses that combine several objects (the result of an AI pipeline) are at the
 from datetime import date, time
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from pacer.ai.agent import AgentOutcome, AgentResult
 from pacer.ai.answer import AskResult, Coverage
@@ -22,6 +22,7 @@ from pacer.ai.coach import CoachOutcome, CoachResult, InvolveRole
 from pacer.ai.issues import Issue, IssueCode
 from pacer.ai.meeting_pipeline import ExtractionResult
 from pacer.ai.safety import Referral
+from pacer.ai.sensitive import is_sensitive
 from pacer.ai.talk_pipeline import TalkResult
 from pacer.domain import (
     ApprovalKind,
@@ -36,6 +37,7 @@ from pacer.domain import (
     ScheduleSlot,
     StaffMeeting,
     TalkProposal,
+    Task,
     Trainee,
     TraineeNote,
     TraineeStatus,
@@ -122,7 +124,6 @@ class IssueOut(BaseModel):
     item: int | None = Field(description="Position in the model's list (1-based); null for the summary")
     detail: str
     section: str | None = Field(default=None, description="Which list, when the answer has several")
-
 
     @classmethod
     def of(cls, issue: Issue) -> "IssueOut":
@@ -331,6 +332,34 @@ class CoachOut(BaseModel):
         )
 
 
+# --- tasks written by hand (2026-10-27) ---------------------------------------------------------
+
+
+def _no_health(text: str) -> str:
+    """A task is kept and shown to staff: health is never written into Pacer (decision 2026-10-18)."""
+    if is_sensitive(text):
+        raise ValueError("Pacer does not keep health information. Write the task without it")
+    return text
+
+
+class TaskCreate(_Body):
+    description: Annotated[str, StringConstraints(strip_whitespace=True), Task.model_fields["description"]] = Field(
+        examples=["לדבר עם נדב על ההכנה לשיחת הקבוצה"]
+    )
+    due_date: date | None = Field(default=None, description="The deadline; omit for none. Not in the past")
+    owner_id: int | None = Field(default=None, description="Whose task it is; omit for yourself. The manager only")
+    trainee_id: int | None = Field(default=None, description="The trainee it is about, if any")
+
+    @field_validator("description")
+    @classmethod
+    def no_health(cls, text: str) -> str:
+        return _no_health(text)
+
+
+class TaskChange(_Body):
+    due_date: date | None = Field(description="The new deadline, or null for none")
+
+
 # --- the agent (stage 6) -----------------------------------------------------------------------
 
 
@@ -447,9 +476,7 @@ class SessionOut(BaseModel):
 
     @classmethod
     def of(cls, session: ScheduledSession) -> "SessionOut":
-        return cls(
-            **session.model_dump(exclude={"id"}), id=session.key, weekday=Weekday(session.on.weekday()).label
-        )
+        return cls(**session.model_dump(exclude={"id"}), id=session.key, weekday=Weekday(session.on.weekday()).label)
 
 
 class SlotOut(BaseModel):

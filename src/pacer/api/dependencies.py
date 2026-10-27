@@ -254,8 +254,13 @@ def get_meeting_service(
     return MeetingService(meetings, proposals, tasks, staff)
 
 
-def get_task_service(tasks: Annotated[TaskRepo, Depends(get_task_repository)]) -> TaskService:
-    return TaskService(tasks)
+def get_task_service(
+    tasks: Annotated[TaskRepo, Depends(get_task_repository)],
+    staff: Annotated[StaffRepo, Depends(get_staff_repository)],
+    trainees: Annotated[TraineeRepo, Depends(get_trainee_repository)],
+    groups: Annotated[GroupRepo, Depends(get_group_repository)],
+) -> TaskService:
+    return TaskService(tasks, staff, trainees, groups)
 
 
 MeetingServiceDep = Annotated[MeetingService, Depends(get_meeting_service)]

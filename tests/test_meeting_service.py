@@ -32,7 +32,7 @@ def service(world) -> MeetingService:
 
 @pytest.fixture
 def tasks(world) -> TaskService:
-    return TaskService(world.tasks)
+    return TaskService(world.tasks, world.staff, world.trainees, world.groups)
 
 
 def new_meeting(world, service):

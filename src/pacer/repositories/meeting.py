@@ -153,6 +153,16 @@ class TaskRepository:
         rows = self._session.scalars(select(TaskRow).where(TaskRow.owner_id == owner_id).order_by(TaskRow.id))
         return [Task.model_validate(row, from_attributes=True) for row in rows]
 
+    def list_by_trainee(self, trainee_id: int) -> list[Task]:
+        rows = self._session.scalars(select(TaskRow).where(TaskRow.trainee_id == trainee_id).order_by(TaskRow.id))
+        return [Task.model_validate(row, from_attributes=True) for row in rows]
+
     def list_all(self) -> list[Task]:
         rows = self._session.scalars(select(TaskRow).order_by(TaskRow.id))
         return [Task.model_validate(row, from_attributes=True) for row in rows]
+
+    def delete(self, task_id: int) -> None:
+        row = self._session.get(TaskRow, task_id)
+        if row is not None:
+            self._session.delete(row)
+            self._session.flush()
