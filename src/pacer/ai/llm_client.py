@@ -16,7 +16,8 @@ Rules this module enforces for EVERY call:
 import logging
 import os
 import time
-from typing import Any, Protocol
+from collections.abc import Sequence
+from typing import Any, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, SecretStr
 
@@ -70,6 +71,58 @@ class LLMClient(Protocol):
         """response_schema: a JSON Schema the answer should follow (see structured.py).
         A hint to the provider; the caller still validates the answer."""
         ...
+
+
+# --- tool calling (stage 6: the agent) -----------------------------------------------------
+
+
+class ToolCall(BaseModel):
+    """The model ASKS for a tool to run; our code decides whether and how. Nothing runs by itself."""
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str  # the provider's id, sent back with the result so the model knows which call it answers
+    name: str
+    arguments: str  # JSON text, exactly as the model wrote it: parsed and validated by the tool layer
+
+
+class ChatResponse(BaseModel):
+    """One turn of a conversation with tools: text, tool calls, or both."""
+
+    model_config = ConfigDict(frozen=True)
+
+    text: str
+    tool_calls: tuple[ToolCall, ...]
+    model: str
+    prompt_ref: str
+    input_tokens: int
+    output_tokens: int
+    cost_usd: float | None
+    latency_ms: int
+    truncated: bool
+
+
+@runtime_checkable
+class ChatClient(Protocol):
+    """A model that can be given tools. A separate interface from LLMClient: most of Pacer sends one
+    message and reads one answer, and should not need to know about conversations or tools.
+
+    messages: OpenAI-style dicts (role user / assistant / tool), the format LiteLLM translates for
+    every provider. tools: JSON schemas of functions. allow_tools=False: the tools stay visible (the
+    conversation refers to them) but the model must answer in text, used for the last round."""
+
+    model: str
+    runs_locally: bool
+
+    def chat(
+        self,
+        prompt: Prompt,
+        messages: Sequence[dict[str, Any]],
+        *,
+        tools: Sequence[dict[str, Any]],
+        max_tokens: int = 1024,
+        allow_tools: bool = True,
+    ) -> ChatResponse: ...
 
 
 # --- errors -------------------------------------------------------------------------------
@@ -191,15 +244,52 @@ class LiteLLMClient:
         )
         return response
 
-    def _request(
-        self, prompt: Prompt, user_message: str, max_tokens: int, response_schema: dict[str, Any] | None
-    ) -> dict:
+    def chat(
+        self,
+        prompt: Prompt,
+        messages: Sequence[dict[str, Any]],
+        *,
+        tools: Sequence[dict[str, Any]],
+        max_tokens: int = 1024,
+        allow_tools: bool = True,
+    ) -> ChatResponse:
+        if not messages:
+            raise ValueError("messages is empty")
+        request = self._base_request(prompt, messages, max_tokens)
+        if tools:
+            request["tools"] = list(tools)
+            request["tool_choice"] = "auto" if allow_tools else "none"
+        started = time.perf_counter()
+        try:
+            raw = litellm.completion(**request)
+        except Exception as error:
+            translated = translate_error(error)
+            log.warning(
+                "LLM chat failed: prompt=%s model=%s error=%s", prompt.ref, self.model, type(translated).__name__
+            )
+            raise translated from error
+        base = self._to_response(raw, prompt, started)
+        calls = tuple(
+            ToolCall(id=call.id, name=call.function.name, arguments=call.function.arguments or "{}")
+            for call in (raw.choices[0].message.tool_calls or [])
+        )
+        response = ChatResponse(**base.model_dump(), tool_calls=calls)
+        log.info(
+            "LLM chat: prompt=%s model=%s tokens=%s->%s cost=%s latency=%sms tools=%s",
+            response.prompt_ref,
+            response.model,
+            response.input_tokens,
+            response.output_tokens,
+            "unknown" if response.cost_usd is None else f"${response.cost_usd:.6f}",
+            response.latency_ms,
+            ",".join(c.name for c in calls) or "-",  # names only: the arguments may hold personal data
+        )
+        return response
+
+    def _base_request(self, prompt: Prompt, messages: Sequence[dict[str, Any]], max_tokens: int) -> dict:
         request = {
             "model": self.model,
-            "messages": [
-                {"role": "system", "content": prompt.system},
-                {"role": "user", "content": user_message},
-            ],
+            "messages": [{"role": "system", "content": prompt.system}, *messages],
             "max_tokens": max_tokens,
             "timeout": self._timeout_s,
             "num_retries": self._retries,  # retries transient failures (rate limit, overload)
@@ -207,6 +297,16 @@ class LiteLLMClient:
         if self._temperature is not None:
             request["temperature"] = self._temperature
         request.update(self._options)
+        if self._api_key is not None:
+            request["api_key"] = self._api_key.get_secret_value()  # passed per call, never put in os.environ
+        if self._api_base is not None:
+            request["api_base"] = self._api_base
+        return request
+
+    def _request(
+        self, prompt: Prompt, user_message: str, max_tokens: int, response_schema: dict[str, Any] | None
+    ) -> dict:
+        request = self._base_request(prompt, [{"role": "user", "content": user_message}], max_tokens)
         if response_schema is not None and self.native_schema:
             # The provider constrains the answer to this shape. For Anthropic, litellm also removes
             # the keywords Claude rejects (minLength, maximum...) and keeps them as descriptions.
@@ -214,10 +314,6 @@ class LiteLLMClient:
                 "type": "json_schema",
                 "json_schema": {"name": "response", "schema": response_schema, "strict": True},
             }
-        if self._api_key is not None:
-            request["api_key"] = self._api_key.get_secret_value()  # passed per call, never put in os.environ
-        if self._api_base is not None:
-            request["api_base"] = self._api_base
         return request
 
     def _to_response(self, raw, prompt: Prompt, started: float) -> LLMResponse:

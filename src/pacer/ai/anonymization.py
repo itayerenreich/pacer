@@ -336,6 +336,65 @@ def deanonymize(text: str, source: AnonymizedText, name_for: Callable[[Person], 
     return _TOKEN.sub(restore, text)
 
 
+class AnonymizationSession:
+    """One token space for a whole conversation (stage 6: the agent).
+
+    The agent sends many texts to the model over one conversation: the counselor's message, earlier
+    turns, and the result of every tool. A person's token is stable by itself ([TRAINEE_7] is trainee 7
+    everywhere), but [NAME_n] is numbered per text: anonymized one by one, two texts would each have a
+    [NAME_1] for two different words, and the model would take them for one person. The session renumbers
+    every text's [NAME_n] into one sequence, the same word always getting the same token, and keeps every
+    token it handed out, so the final answer is restored from the whole conversation.
+
+    Text from outside (a message, a tool's result) can contain something that LOOKS like a token,
+    typed or copied. It is defused first ("[TRAINEE_3]" becomes "TRAINEE_3"), so it cannot be restored
+    as a name it never stood for.
+    """
+
+    def __init__(self, roster: Roster) -> None:
+        self._anonymizer = Anonymizer(roster)
+        self._people: dict[str, Person] = {}
+        self._unresolved: dict[str, str] = {}  # [NAME_n] -> the word as first written
+        self._by_word: dict[str, str] = {}  # the normalized word -> its [NAME_n]
+
+    def anonymize(self, text: str, *, prefer: Iterable[Person] = ()) -> str:
+        part = self._anonymizer.anonymize(defuse_tokens(text), prefer=prefer)
+        renumber: dict[str, str] = {}
+        for token, word in part.unresolved.items():
+            key = _normalize(word)
+            if key not in self._by_word:
+                self._by_word[key] = f"[NAME_{len(self._by_word) + 1}]"
+                self._unresolved[self._by_word[key]] = word
+            renumber[token] = self._by_word[key]
+        self._people.update(part.people)
+        return _NAME_TOKEN.sub(lambda m: renumber.get(m.group(0), m.group(0)), part.text)
+
+    def view(self) -> AnonymizedText:
+        """Everything handed out so far, as one AnonymizedText: for deanonymize() and for checking that
+        a model's answer uses only tokens it was given."""
+        return AnonymizedText(
+            text="",
+            people=MappingProxyType(dict(self._people)),
+            unresolved=MappingProxyType(dict(self._unresolved)),
+            _key=_CREATED_BY_ANONYMIZER,
+        )
+
+    def word_for(self, token: str) -> str | None:
+        """The word behind a [NAME_n] token, as the counselor wrote it ("which יעל?" needs the word)."""
+        return self._unresolved.get(token)
+
+    def contains_known_name(self, text: str) -> bool:
+        return self._anonymizer.contains_known_name(text)
+
+
+_NAME_TOKEN = re.compile(r"\[NAME_\d+\]")
+
+
+def defuse_tokens(text: str) -> str:
+    """Brackets off anything that looks like a token, so only the anonymizer creates tokens."""
+    return _TOKEN.sub(lambda m: m.group(0)[1:-1], text)
+
+
 def tokens_in(text: str) -> list[str]:
     """Every token in a text, in order. Used to validate a model's answer."""
     return _TOKEN.findall(text)

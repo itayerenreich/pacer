@@ -219,3 +219,72 @@ def test_a_local_model_gets_the_json_schema_as_a_constraint(sent):
     assert client.native_schema
     client.complete(PROMPT, "שלום", response_schema={"type": "object"})
     assert sent.requests[-1]["response_format"]["json_schema"]["schema"] == {"type": "object"}
+
+
+# --- tool calling (stage 6) ---------------------------------------------------------------
+
+
+def _raw_with_tools(text, calls, finish="tool_calls"):
+    message = SimpleNamespace(
+        content=text,
+        tool_calls=[
+            SimpleNamespace(id=f"toolu_{i}", function=SimpleNamespace(name=name, arguments=args))
+            for i, (name, args) in enumerate(calls)
+        ]
+        or None,
+    )
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=message, finish_reason=finish)],
+        usage=SimpleNamespace(prompt_tokens=1000, completion_tokens=100),
+    )
+
+
+TOOLS = [{"type": "function", "function": {"name": "week_schedule", "description": "d", "parameters": {"type": "object"}}}]
+
+
+def test_chat_sends_the_tools_and_returns_the_calls_the_model_asked_for(monkeypatch, caplog):
+    requests = []
+
+    def fake(**request):
+        requests.append(request)
+        return _raw_with_tools(None, [("week_schedule", '{"day": "2026-10-27"}')])
+
+    monkeypatch.setattr(module.litellm, "completion", fake)
+    with caplog.at_level(logging.INFO, logger="pacer.ai.llm_client"):
+        response = cloud().chat(PROMPT, [{"role": "user", "content": SECRET_MESSAGE}], tools=TOOLS)
+    (request,) = requests
+    assert request["messages"][0] == {"role": "system", "content": PROMPT.system}
+    assert request["tools"] == TOOLS and request["tool_choice"] == "auto"
+    (call,) = response.tool_calls
+    assert (call.id, call.name, call.arguments) == ("toolu_0", "week_schedule", '{"day": "2026-10-27"}')
+    assert response.text == "" and response.cost_usd == pytest.approx((1000 * 0.10 + 100 * 0.50) / 1_000_000)
+    assert "week_schedule" in caplog.text
+    assert SECRET_MESSAGE not in caplog.text and "2026-10-27" not in caplog.text  # names of tools only
+
+
+def test_chat_on_the_last_round_keeps_the_tools_but_forbids_calling_them(monkeypatch):
+    requests = []
+    monkeypatch.setattr(module.litellm, "completion", lambda **r: requests.append(r) or _raw_with_tools("סוף", [], "stop"))
+    response = cloud().chat(PROMPT, [{"role": "user", "content": "x"}], tools=TOOLS, allow_tools=False)
+    assert requests[0]["tool_choice"] == "none" and requests[0]["tools"] == TOOLS
+    assert response.text == "סוף" and response.tool_calls == ()
+
+
+def test_chat_errors_are_ours(monkeypatch):
+    def fail(**request):
+        raise module.litellm_errors.RateLimitError("slow down", llm_provider="anthropic", model="m")
+
+    monkeypatch.setattr(module.litellm, "completion", fail)
+    with pytest.raises(LLMRateLimitError):
+        cloud().chat(PROMPT, [{"role": "user", "content": "x"}], tools=TOOLS)
+
+
+def test_chat_needs_a_message():
+    with pytest.raises(ValueError):
+        cloud().chat(PROMPT, [], tools=TOOLS)
+
+
+def test_the_real_client_is_a_chat_client():
+    from pacer.ai.llm_client import ChatClient
+
+    assert isinstance(cloud(), ChatClient)

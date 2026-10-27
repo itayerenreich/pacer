@@ -152,7 +152,13 @@ def coach_document(question: str, context: TraineeContext | None) -> str:
     lines = ["Question:", question, ""]
     if context is None:
         return "\n".join([*lines, "Trainee: none (a general question)"])
-    lines += [f"Trainee: {context.trainee.full_name}", "Goals:"]
+    return "\n".join([*lines, *trainee_lines(context)])
+
+
+def trainee_lines(context: TraineeContext) -> list[str]:
+    """What is known about a trainee, one item per line. The coach's message and the agent's
+    trainee_record tool both use it, so the two read a trainee the same way."""
+    lines = [f"Trainee: {context.trainee.full_name}", "Goals:"]
     for item in context.goals:
         goal = item.goal
         lines.append(f"- {goal.title} (category: {goal.category}, progress: {goal.progress}%, status: {goal.status})")
@@ -164,7 +170,7 @@ def coach_document(question: str, context: TraineeContext | None) -> str:
     lines += [f"- [{note.kind}] {note.created_at:%Y-%m-%d}: {note.text}" for note in context.notes]
     if not context.notes:
         lines.append("- (no notes yet)")
-    return "\n".join(lines)
+    return lines
 
 
 def _attendance_lines(context: TraineeContext) -> list[str]:
@@ -467,7 +473,7 @@ class Coach:
                 cost_usd=cost,
                 removed_sentences=prepared.removed,
             )
-        advice = validate_coach(result.value, hits, prepared.document, _names_as_written(question, visible))
+        advice = validate_coach(result.value, hits, prepared.document, names_as_written(question, visible))
         log.info(
             "Coach: advice for trainee %s, asked by staff %s: steps=%s grounded=%s involve=%s issues=%s removed=%s",
             trainee_id,
@@ -490,7 +496,7 @@ class Coach:
         )
 
 
-def _names_as_written(question: str, visible: set[int]) -> Callable[[Person], str]:
+def names_as_written(question: str, visible: set[int]) -> Callable[[Person], str]:
     """Staff, and trainees the asker may see: the full name. Any other trainee: only as the asker wrote
     them, never completed ("נדב" stays "נדב", not "נדב הררי"), so a general question cannot be used to
     learn who is in another group (independent review, 2026-10-25)."""

@@ -34,6 +34,8 @@ class IssueCode(StrEnum):
     CONTRADICTORY_COVERAGE = "contradictory_coverage"  # "the library has nothing", with claims that cite it
     # the counselor coach (stage 5)
     NO_ADVICE = "no_advice"  # every step was removed by validation
+    # the agent (stage 6)
+    TRUNCATED = "truncated"  # the answer hit the token limit and was cut off
 
 
 @dataclass(frozen=True)
