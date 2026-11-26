@@ -25,10 +25,79 @@ one place.
 **About me:** I'm Itay Erenreich, a computer science and psychology student. Before my degree I was a
 counselor and a branch manager at a pre-military academy, and saw firsthand the need Pacer is built for.
 
+## What I built
+
+The requirements come from my years as a counselor and a branch manager. A system this size has more
+parts than one person can go deep into, so I chose five areas to specialize in. These are the five
+parts I put the most into:
+
+1. **Answers you can check.** In an academy the manager is responsible for the texts the staff work
+   from, and wants them to form one educational line that counselors rely on. So a library answer may
+   say only what those texts say: every claim cites a passage that was really sent, a claim with no
+   passage behind it is dropped and reported, and below a relevance floor (0.44, set by measurement)
+   no model is asked at all. Structured answers are validated in code: one correction, never a guess.
+   From my own experience as a counselor, I replaced six of the evaluation questions with ones I
+   believed were more focused and more accurate. Measured: 98% of claims supported by the passage
+   they cite, and 92% of checklist items met, against 74% for the same model without the library. I
+   also asked that the limits be written next to the results: the library is a limited collection,
+   not every text or study that exists, and an answer from it is not absolute truth.
+2. **The RAG pipeline, end to end.** Import from Word and PDF, cleaning, chunking (word windows with
+   overlap), embeddings on my own computer, search in pgvector, retrieval rules (at most 2 chunks per
+   source), and citations built from our own metadata, never by the model. I chose pgvector in the
+   existing PostgreSQL over ChromaDB, and bge-m3 over qwen3-embedding after measuring both on Hebrew
+   (7 of 8 vs 2 of 8 at rank 1). The demo library's texts are only test material: my goal was to find
+   the right way to build a RAG pipeline, and along the way I learned a lot about embeddings (which
+   model fits best), about chunking, and about how retrieval works behind the scenes.
+3. **The architecture.** My decision was to separate the system into layers, so that privacy is as
+   strong as it can be: content does not leak from one part to another, and a person without permission
+   cannot touch what they should not. Each layer has one job and imports only the ones below it.
+   `domain` holds the data models and their rules, and knows nothing about the database or the web.
+   `repositories` is the only layer that talks to the database. `services` holds the business rules
+   and decides who may do what. Everything that reaches a language model goes through `ai`, where names
+   are replaced by tokens before anything leaves the computer. `api` only turns HTTP requests into
+   calls to the layers below. Three rules hold it together: one unit of work per request, so a
+   request's changes are saved together or not at all; no model call inside a database transaction,
+   so a slow model never holds the database; and one permission rule in the services (404 for a record
+   you may not see) that the API, the coach and the agent all obey.
+4. **System prompts, and what each change did.** The system prompt is what makes the model's answer
+   precise, and for the agent it also steers what gets looked up. That is critical for the manager, who
+   needs to know that a counselor or staff member gets the most accurate answer to the question they
+   asked. So I required from the start that no model call goes out without one. I worked on the prompts
+   together with Claude: Claude drafted the wording, I ran them against real cases on my computer, and
+   what those runs showed decided each change. Every model call uses a versioned system prompt
+   (`prompts/<name>/vN.md`), and a used version is never edited. Each new version answers something a
+   real run showed: `library_answer` v1 to v3 (one "insufficient" flag became three coverage levels,
+   then coverage follows what the answer cites), `meeting_extract` v1 to v3 (a task for a counselor who
+   was absent, a name that is also an ordinary word), `agent` v1 to v2 (Hebrew only, never mention
+   tokens or tools). Eleven prompts, each change checked against a versioned evaluation set.
+5. **The API.** What mattered to me in the API is who may see what. I set the rules: the manager sees
+   everything, a counselor sees only the trainees of their own groups, and among counselors only the
+   trainee's primary counselor edits goals. The rules live in the services, so the API stays thin and
+   every entry point obeys the same ones. I also decided that someone who may not see a record gets
+   404, as if it did not exist, so nobody can learn who is in the academy by trying ids. The mechanics
+   were built together with Claude, and my rule was that I must be able to explain every file: 55 REST
+   endpoints in FastAPI, in 11 routers; dependency injection gives each request one unit of work,
+   which commits before the response is sent; domain and service errors map to 401/403/404/409/422,
+   and AI errors to 502/503. Every endpoint is documented at `/docs`.
+
+## How I used AI tools
+
+I built Pacer together with AI coding tools (Claude), and much of the code was written with them.
+Outside the five areas above I leaned on them more: the React + TypeScript interface, parts of the
+data storage and SQL, Python syntax, and getting things like the permission checks implemented
+correctly. Larger changes were also reviewed by an independent agent that did not see them being
+built. What to build and the main decisions are mine, and after the first setup commits every change
+reached `main` through a pull request I merged.
+
+Pacer is not finished. I am now trying to bring it into real use, fixing and learning as I go, and I
+keep going deeper into the parts I have not specialized in yet.
+
 ---
 
 ## Contents
 
+- [What I built](#what-i-built)
+- [How I used AI tools](#how-i-used-ai-tools)
 - [What it does](#what-it-does)
 - [Principles](#principles)
 - [Architecture](#architecture)
